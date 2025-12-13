@@ -1,0 +1,464 @@
+/**
+ * Main styles for Atlantis application.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* App Shell */
+.app-shell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.app-shell-left {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-button {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.2s;
+}
+
+.nav-button:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.app-shell-center h1 {
+  font-size: 18px;
+  font-weight: 500;
+  color: #111827;
+  text-transform: lowercase;
+}
+
+.app-shell-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.map-style-selector {
+  display: flex;
+  align-items: center;
+}
+
+.map-style-picker {
+  display: flex;
+  align-items: center;
+}
+
+.map-style-select {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  min-width: 150px;
+}
+
+.map-style-select:hover {
+  border-color: #d1d5db;
+}
+
+.map-style-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.language-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-picker {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.date-selector {
+  display: flex;
+  align-items: center;
+}
+
+.date-picker {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* App Content */
+.app-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.map-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 16px 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+
+.map-error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  z-index: 100;
+}
+
+.map-error-message {
+  background: white;
+  padding: 32px;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+  margin: 24px;
+}
+
+.map-error-message h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 16px;
+}
+
+.map-error-message p {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.map-error-message ol {
+  margin-left: 24px;
+  margin-bottom: 16px;
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.map-error-message li {
+  margin-bottom: 8px;
+}
+
+.map-error-message code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "Monaco", "Courier New", monospace;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.map-error-message a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.map-error-message a:hover {
+  text-decoration: underline;
+}
+
+.map-error-note {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  color: #6b7280;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* World Map */
+.world-map {
+  width: 100%;
+  height: 100%;
+}
+
+.map-marker {
+  position: relative;
+  transition: all 0.2s;
+}
+
+.map-marker:hover {
+  transform: scale(1.1);
+  z-index: 10;
+}
+
+.map-marker.selected {
+  border: 3px solid #000 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3) !important;
+}
+
+.map-marker.related {
+  border: 2px solid #8b5cf6 !important;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3) !important;
+}
+
+/* Event Dialog */
+.event-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 24px;
+}
+
+.event-dialog {
+  background: white;
+  border-radius: 12px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 24px;
+  position: relative;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.event-dialog-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #6b7280;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.event-dialog-close:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.event-dialog h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.event-location {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.event-date {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.event-explanation {
+  margin-bottom: 24px;
+}
+
+.event-explanation h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+
+.event-explanation h3:first-child {
+  margin-top: 0;
+}
+
+.event-one-liner {
+  color: #374151;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+  font-style: italic;
+}
+
+.explanation-content {
+  color: #374151;
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.explanation-text {
+  color: #374151;
+}
+
+.loading {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Event Chat */
+.event-chat {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 24px;
+}
+
+.event-chat h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 16px;
+}
+
+.chat-history {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.chat-message {
+  margin-bottom: 12px;
+}
+
+.chat-message:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message strong {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.chat-message.user strong {
+  color: #3b82f6;
+}
+
+.chat-message.assistant strong {
+  color: #10b981;
+}
+
+.chat-message p {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-input input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.chat-input input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.chat-input button {
+  padding: 10px 20px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chat-input button:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.chat-input button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+

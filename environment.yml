@@ -1,0 +1,11 @@
+# Conda environment specification
+name: agent-env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - google-genai>=0.2.0
+    - python-dotenv>=1.0.0

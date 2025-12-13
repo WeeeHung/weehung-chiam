@@ -2,9 +2,11 @@
  * Event dialog component for displaying event details and Q&A.
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import { Pin, ChatMessage } from "../types/events";
-import { useSSE, useSSEPost } from "../hooks/useSSE";
+import { useSentenceStream } from "../hooks/useSentenceStream";
 
 interface EventDialogProps {
   pin: Pin | null;
@@ -15,26 +17,19 @@ interface EventDialogProps {
 export function EventDialog({ pin, language, onClose }: EventDialogProps) {
   const [question, setQuestion] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [explanation, setExplanation] = useState("");
 
-  // Stream explanation
+  // Stream explanation sentence by sentence
   const explanationUrl = pin
     ? `/api/events/${pin.event_id}/explain/stream?language=${language}`
     : "";
-  
-  // Use useCallback to memoize the onChunk callback to prevent reconnections
-  const handleExplanationChunk = React.useCallback((chunk: string) => {
-    setExplanation((prev) => prev + chunk);
-  }, []);
 
-  const { isStreaming: isExplaining } = useSSE(explanationUrl, {
-    onChunk: handleExplanationChunk,
-  });
+  const { displayedText: explanation, isStreaming: isExplaining } = useSentenceStream(
+    explanationUrl
+  );
 
   // Reset when pin changes
   useEffect(() => {
     if (pin) {
-      setExplanation("");
       setChatHistory([]);
       setQuestion("");
     }
@@ -82,12 +77,26 @@ export function EventDialog({ pin, language, onClose }: EventDialogProps) {
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
+          let eventData: string[] = [];
           for (const line of lines) {
             if (line.startsWith("data: ")) {
-              const chunk = line.slice(6);
-              assistantResponse += chunk;
-            } else if (line.startsWith("event: done")) {
-              break;
+              // Collect data lines (SSE spec: multiple data lines are concatenated with newlines)
+              eventData.push(line.slice(6));
+            } else if (line.startsWith("event: done") || (line === "" && eventData.length > 0)) {
+              // End of event - concatenate all data lines with newlines
+              if (eventData.length > 0) {
+                assistantResponse += eventData.join("\n");
+                eventData = [];
+              }
+              if (line.startsWith("event: done")) {
+                break;
+              }
+            } else if (line === "") {
+              // Empty line after data lines - flush accumulated data
+              if (eventData.length > 0) {
+                assistantResponse += eventData.join("\n");
+                eventData = [];
+              }
             }
           }
         }
@@ -116,15 +125,15 @@ export function EventDialog({ pin, language, onClose }: EventDialogProps) {
         <p className="event-date">{pin.date}</p>
 
         <div className="event-explanation">
-          <h3>Why this matters</h3>
-          <p className="event-one-liner">{pin.one_liner}</p>
-
-          <h3>Explanation</h3>
           <div className="explanation-content">
             {isExplaining && !explanation ? (
-              <div className="loading">Loading explanation...</div>
+              <div className="loading">Loading article...</div>
             ) : (
-              <div className="explanation-text">{explanation}</div>
+              <div className="explanation-text">
+                <ReactMarkdown remarkPlugins={[remarkBreaks]}>
+                  {explanation}
+                </ReactMarkdown>
+              </div>
             )}
           </div>
         </div>

@@ -2,9 +2,8 @@
  * Date picker component for selecting event date.
  */
 
-import React from "react";
-import DatePickerLib from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
+import { DatePickerInput } from "@mantine/dates";
+import dayjs from "dayjs";
 
 interface DatePickerProps {
   value: string; // YYYY-MM-DD format
@@ -12,24 +11,40 @@ interface DatePickerProps {
 }
 
 export function DatePicker({ value, onChange }: DatePickerProps) {
-  const date = value ? new Date(value) : new Date();
+  const date = value ? dayjs(value).toDate() : null;
 
   const handleChange = (date: Date | null) => {
     if (date) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      onChange(`${year}-${month}-${day}`);
+      const formatted = dayjs(date).format("YYYY-MM-DD");
+      onChange(formatted);
     }
   };
 
   return (
-    <DatePickerLib
-      selected={date}
+    <DatePickerInput
+      value={date}
       onChange={handleChange}
-      dateFormat="yyyy-MM-dd"
       maxDate={new Date()}
-      className="date-picker"
+      placeholder="Select date"
+      size="sm"
+      radius="md"
+      styles={{
+        input: {
+          background: "rgba(255, 255, 255, 0.6)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          border: "1px solid rgba(255, 255, 255, 0.2)",
+          transition: "all 0.2s ease",
+          "&:hover": {
+            background: "rgba(255, 255, 255, 0.8)",
+            borderColor: "rgba(255, 255, 255, 0.4)",
+          },
+          "&:focus": {
+            background: "rgba(255, 255, 255, 0.9)",
+            borderColor: "rgba(59, 130, 246, 0.5)",
+          },
+        },
+      }}
     />
   );
 }

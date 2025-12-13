@@ -55,6 +55,38 @@ class CacheService:
         """Generate cache key for explanation."""
         return self._make_key("explanation", event_id, language)
     
+    def get_date_pins_key(self, date: str, language: str) -> str:
+        """Generate cache key for accumulated pins by date."""
+        return self._make_key("date_pins", date, language)
+    
+    def get_date_pins(self, date: str, language: str) -> Optional[Any]:
+        """Get all accumulated pins for a date."""
+        key = self.get_date_pins_key(date, language)
+        return self.get(key)
+    
+    def merge_and_set_date_pins(self, date: str, language: str, new_pins: list) -> list:
+        """
+        Merge new pins with existing pins for a date (deduplicate by event_id).
+        Returns the merged list of pins.
+        """
+        key = self.get_date_pins_key(date, language)
+        existing_pins = self.get(key) or []
+        
+        # Create a set of existing event_ids for fast lookup
+        existing_ids = {pin.event_id for pin in existing_pins}
+        
+        # Add new pins that don't already exist
+        merged_pins = list(existing_pins)
+        for new_pin in new_pins:
+            if new_pin.event_id not in existing_ids:
+                merged_pins.append(new_pin)
+                existing_ids.add(new_pin.event_id)
+        
+        # Update cache with merged pins
+        self.set_pins(key, merged_pins)
+        
+        return merged_pins
+    
     def get(self, key: str) -> Optional[Any]:
         """Get value from cache if not expired."""
         if key not in self._cache:

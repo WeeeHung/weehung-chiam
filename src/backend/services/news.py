@@ -45,12 +45,31 @@ class NewsService:
             return []
         
         try:
+            # Parse date and check if it's too far in the past
+            try:
+                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                today = datetime.now().date()
+                days_diff = (today - date_obj.date()).days
+                
+                # NewsAPI only supports dates within the last ~30 days
+                # For historical dates, skip NewsAPI and let Gemini generate historical events
+                if days_diff > 30:
+                    print(f"Date {date} is too far in the past ({days_diff} days). Skipping NewsAPI for historical dates.")
+                    return []
+                
+                # Also check if date is in the future
+                if days_diff < 0:
+                    print(f"Date {date} is in the future. Skipping NewsAPI.")
+                    return []
+                    
+            except ValueError:
+                # Invalid date format, skip NewsAPI
+                print(f"Invalid date format: {date}. Skipping NewsAPI.")
+                return []
+            
             # Calculate center point of bbox
             center_lat = (bbox["north"] + bbox["south"]) / 2
             center_lng = (bbox["east"] + bbox["west"]) / 2
-            
-            # Calculate approximate country/region from bbox
-            # For now, we'll use the center point for location-based search
             
             # NewsAPI parameters
             params = {
@@ -60,33 +79,19 @@ class NewsService:
                 "sortBy": "relevancy",
             }
             
-            # For historical dates, use "everything" endpoint
-            # For recent dates, use "top-headlines" or "everything"
-            try:
-                date_obj = datetime.strptime(date, "%Y-%m-%d")
-                today = datetime.now().date()
-                days_diff = (today - date_obj.date()).days
-                
-                if days_diff <= 7:
-                    # Recent news - use top-headlines
-                    # Note: top-headlines doesn't support date filtering well
-                    # So we'll use everything endpoint with date range
-                    url = f"{self.base_url}/everything"
-                    params["from"] = date
-                    params["to"] = date
-                    # Search for news in the region (approximate)
-                    params["q"] = "*"  # Get all news, filter by date
-                else:
-                    # Historical news - use everything endpoint
-                    url = f"{self.base_url}/everything"
-                    params["from"] = date
-                    params["to"] = date
-                    params["q"] = "*"  # Get all news for that date
-                    
-            except ValueError:
-                # Invalid date format, use everything endpoint
-                url = f"{self.base_url}/everything"
-                params["q"] = "*"
+            # Use everything endpoint for recent dates
+            url = f"{self.base_url}/everything"
+            params["from"] = date
+            params["to"] = date
+            
+            # Use a more specific query instead of "*" which might cause issues
+            # Search for general news (empty query gets recent articles)
+            if days_diff <= 7:
+                # Very recent - can use empty query or specific terms
+                params["q"] = "news"  # More specific than "*"
+            else:
+                # Recent but not today - use date range
+                params["q"] = "news"
             
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
@@ -109,6 +114,13 @@ class NewsService:
             
             return enriched_articles
             
+        except requests.exceptions.HTTPError as e:
+            # Handle specific HTTP errors
+            if e.response.status_code == 426:
+                print(f"NewsAPI 426 error for date {date}: API plan restrictions or unsupported date range. Skipping NewsAPI.")
+                return []
+            print(f"Error fetching news from NewsAPI: {e}")
+            return []
         except requests.exceptions.RequestException as e:
             print(f"Error fetching news from NewsAPI: {e}")
             return []
@@ -167,11 +179,51 @@ class GeocodingService:
             
             results = response.json()
             if results and len(results) > 0:
-                result = results[0]
+                # Prefer more specific results (those with more address components)
+                # Sort by importance (lower is better) and type specificity
+                def result_specificity(result):
+                    """Calculate specificity score - lower is more specific."""
+                    importance = result.get("importance", 1.0)
+                    place_type = result.get("type", "")
+                    # Prefer places, buildings, amenities over cities, countries
+                    type_priority = {
+                        "place": 1,
+                        "building": 1,
+                        "amenity": 2,
+                        "tourism": 2,
+                        "historic": 2,
+                        "neighbourhood": 3,
+                        "suburb": 3,
+                        "city": 4,
+                        "country": 5,
+                    }
+                    type_score = type_priority.get(place_type, 3)
+                    return (type_score, importance)
+                
+                # Sort by specificity (more specific first)
+                sorted_results = sorted(results, key=result_specificity)
+                result = sorted_results[0]
+                
+                # Extract a more specific display name
+                display_name = result.get("display_name", location_name)
+                # Nominatim format: "Place, District, City, Region, Country"
+                # For more specificity, we can use the address components
+                address = result.get("address", {})
+                if address:
+                    # Build a more specific name from address components
+                    specific_parts = []
+                    # Order of specificity: place > neighbourhood > suburb > city > state > country
+                    for key in ["place", "neighbourhood", "suburb", "city", "state", "country"]:
+                        if key in address and address[key]:
+                            specific_parts.append(address[key])
+                    if specific_parts:
+                        # Use first 2-3 parts for a specific but readable location
+                        display_name = ", ".join(specific_parts[:min(3, len(specific_parts))])
+                
                 return {
                     "lat": float(result.get("lat", 0)),
                     "lng": float(result.get("lon", 0)),
-                    "display_name": result.get("display_name", location_name)
+                    "display_name": display_name
                 }
             
             return None

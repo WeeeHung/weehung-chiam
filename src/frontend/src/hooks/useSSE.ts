@@ -43,12 +43,18 @@ export function useSSE(url: string, options: UseSSEOptions = {}) {
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
 
+    // Listen for custom "chunk" event type
+    eventSource.addEventListener("chunk", (event: MessageEvent) => {
+      const chunk = event.data;
+      setData((prev) => prev + chunk);
+      onChunkRef.current?.(chunk);
+    });
+
+    // Also handle default message events (for compatibility)
     eventSource.onmessage = (event) => {
-      if (event.type === "message" || event.type === "chunk") {
-        const chunk = event.data;
-        setData((prev) => prev + chunk);
-        onChunkRef.current?.(chunk);
-      }
+      const chunk = event.data;
+      setData((prev) => prev + chunk);
+      onChunkRef.current?.(chunk);
     };
 
     eventSource.addEventListener("done", () => {
@@ -133,17 +139,30 @@ export function useSSEPost(
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
+          let eventData: string[] = [];
           for (const line of lines) {
             if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data.trim()) {
-                setData((prev) => prev + data);
-                onChunk?.(data);
+              // Collect data lines (SSE spec: multiple data lines are concatenated with newlines)
+              eventData.push(line.slice(6));
+            } else if (line.startsWith("event: done") || (line === "" && eventData.length > 0)) {
+              // End of event - concatenate all data lines with newlines
+              if (eventData.length > 0) {
+                const chunk = eventData.join("\n");
+                setData((prev) => prev + chunk);
+                onChunk?.(chunk);
+                eventData = [];
               }
-            } else if (line.startsWith("event: done")) {
-              setIsStreaming(false);
-              onDone?.();
-              return;
+              if (line.startsWith("event: done")) {
+                setIsStreaming(false);
+                onDone?.();
+                return;
+              }
+            } else if (line === "" && eventData.length > 0) {
+              // Empty line after data lines - flush accumulated data
+              const chunk = eventData.join("\n");
+              setData((prev) => prev + chunk);
+              onChunk?.(chunk);
+              eventData = [];
             }
           }
         }

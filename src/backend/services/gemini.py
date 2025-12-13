@@ -9,11 +9,12 @@ import json
 import re
 import logging
 from typing import Iterator, List, Dict, Any, Optional
+from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
 
 from ..models import Pin, Viewport
-from .news import NewsService, GeocodingService
+from .news import GeocodingService
 
 # Load environment variables
 load_dotenv()
@@ -34,8 +35,7 @@ class GeminiService:
                 "Please create a .env file with your API key."
             )
         self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-2.5-flash"
-        self.news_service = NewsService()
+        self.model = "gemini-2.0-flash"
         self.geocoding_service = GeocodingService()
     
     def generate_pins(
@@ -61,27 +61,25 @@ class GeminiService:
         zoom = viewport.zoom
         is_local = zoom >= 6
         
-        # Fetch real news articles for the date and region
-        news_articles = self.news_service.fetch_news(
-            date=date,
-            bbox={
-                "west": viewport.bbox.west,
-                "south": viewport.bbox.south,
-                "east": viewport.bbox.east,
-                "north": viewport.bbox.north,
-            },
-            language=language,
-            max_results=max_pins * 3  # Get more articles to filter from
-        )
+        # Calculate approximate region name from viewport for better web search
+        center_lat = (viewport.bbox.north + viewport.bbox.south) / 2
+        center_lng = (viewport.bbox.east + viewport.bbox.west) / 2
         
-        # Build prompt with real news data
+        # Build prompt with web search instructions
         system_instruction = """You are a world events curator. Your task is to identify significant historical events or news that occurred on a specific date, relevant to a geographic viewport.
 
-You will be provided with REAL NEWS ARTICLES from that date. Your job is to:
-1. Extract the most significant events from the news articles
-2. Identify the EXACT LOCATION where each event occurred or is most relevant
-3. Place pins at the CLOSEST POSSIBLE LOCATION that is relevant to the news/event
-4. Ensure pins are within or as close as possible to the viewport bounding box
+CRITICAL: You MUST use web search to find REAL, ACCURATE news and events from reliable sources for the specified date. 
+- Search for news articles, historical records, and verified sources
+- Reference credible news outlets, historical databases, and official records
+- Cite your sources when possible
+- DO NOT make up or hallucinate events - only use information from web search results
+
+Your job is to:
+1. Use web search to find significant events/news for the exact date and region
+2. Extract the most significant events from reliable sources
+3. Identify the EXACT LOCATION where each event occurred or is most relevant
+4. Place pins at the CLOSEST POSSIBLE LOCATION that is relevant to the news/event
+5. Ensure pins are within or as close as possible to the viewport bounding box
 
 Return STRICT JSON only - no markdown, no explanations, just valid JSON matching this exact schema:
 {
@@ -92,7 +90,7 @@ Return STRICT JSON only - no markdown, no explanations, just valid JSON matching
       "date": "YYYY-MM-DD",
       "lat": 0.0,
       "lng": 0.0,
-      "location_label": "City, Country",
+      "location_label": "Specific Place, City, Country",
       "category": "politics|conflict|culture|science|economics|other",
       "significance_score": 0.0-1.0,
       "one_liner": "One sentence preview",
@@ -102,6 +100,13 @@ Return STRICT JSON only - no markdown, no explanations, just valid JSON matching
   ]
 }
 
+CRITICAL DATE REQUIREMENTS:
+- The date provided is in YYYY-MM-DD format (e.g., "2025-12-14" means December 14, 2025)
+- You MUST only return events that occurred on the EXACT date specified, including the EXACT year
+- DO NOT return events from different years, even if they occurred on the same month and day
+- The "date" field in each pin MUST match the requested date exactly (same year, month, and day)
+- If the requested date is "2025-12-14", only return events from December 14, 2025 - NOT from 1819, 1941, or any other year
+
 CRITICAL LOCATION RULES:
 - lat/lng MUST be the actual location where the event occurred or is most relevant
 - If the event is about a specific city, use that city's coordinates
@@ -109,47 +114,74 @@ CRITICAL LOCATION RULES:
 - If zoom >= 6: prioritize events WITHIN the viewport bbox, or closest to it
 - If zoom < 6: can include globally significant events, but still try to place within viewport if possible
 - ALWAYS verify coordinates are within valid ranges: lat [-90, 90], lng [-180, 180]
-- location_label should be the actual place name (e.g., "New York, USA", "London, UK")
+- location_label MUST be a SPECIFIC place, not a generic location. Examples:
+  * GOOD: "Marina Bay, Singapore", "Times Square, New York, USA", "Westminster, London, UK", "Tiananmen Square, Beijing, China"
+  * BAD: "Singapore", "New York", "London", "China" (too generic)
+  * Prefer specific districts, neighborhoods, landmarks, or notable locations within the city/country
 
 Guidelines:
-- Use REAL events from the provided news articles
-- If no news articles provided, you can suggest historical events for that date
+- ALWAYS use web search to find real events - do not rely on memory alone
+- Search for events matching the exact date (year, month, day)
+- Use reliable sources: major news outlets, historical databases, official records
 - Significance score: 0.9+ for major global events, 0.7-0.9 for regional, 0.5-0.7 for local
-- Confidence: 0.9+ for well-documented events, lower for approximate/uncertain
+- Confidence: 0.9+ for well-documented events from reliable sources, lower for approximate/uncertain
 - Keep neutral tone, avoid sensational language
 - Prioritize events that are geographically relevant to the viewport
+- If web search finds no events for the exact date, indicate this in the confidence score
 """
         
-        # Build news context
-        news_context = ""
-        if news_articles:
-            news_context = "\n\nREAL NEWS ARTICLES FROM THIS DATE:\n"
-            for i, article in enumerate(news_articles[:10], 1):  # Limit to 10 articles
-                news_context += f"\n{i}. {article.get('title', 'No title')}\n"
-                if article.get('description'):
-                    news_context += f"   {article.get('description')}\n"
-                if article.get('source'):
-                    news_context += f"   Source: {article.get('source')}\n"
-        else:
-            news_context = "\n\nNote: No news articles found for this date. You may suggest historical events that occurred on this date."
+        # Parse date to extract year for emphasis
+        try:
+            date_obj = datetime.strptime(date, "%Y-%m-%d")
+            year = date_obj.year
+            month_day = date_obj.strftime("%B %d")
+        except:
+            year = date.split("-")[0] if "-" in date else "unknown"
+            month_day = date
         
-        user_prompt = f"""Date: {date}
+        # Calculate approximate region name from viewport for better web search
+        center_lat = (viewport.bbox.north + viewport.bbox.south) / 2
+        center_lng = (viewport.bbox.east + viewport.bbox.west) / 2
+        
+        # Build region context for web search
+        region_context = ""
+        if is_local:
+            # For local view, provide approximate region
+            region_context = f"Region: Approximately centered at {center_lat:.2f}°N, {center_lng:.2f}°E"
+        
+        user_prompt = f"""Date: {date} (Year: {year}, {month_day})
+
+CRITICAL: You MUST only return events that occurred on {date} (the EXACT year {year}, month, and day). 
+DO NOT return events from other years, even if they occurred on {month_day} in a different year.
+
+MANDATORY WEB SEARCH:
+- You MUST use web search to find real news and events for {date}
+- Search for: "news {date}" OR "events {date}" OR "{month_day} {year} news"
+- Include region-specific searches if relevant: "{month_day} {year} [region] news"
+- Only use information from reliable sources found via web search
+- Cite sources when possible
+- Web search MUST be performed every time to get the most current and accurate information
+
 Viewport: bbox=[{viewport.bbox.west}, {viewport.bbox.south}, {viewport.bbox.east}, {viewport.bbox.north}], zoom={zoom}
-Language: {language}
+{region_context}
+MUST Respond in {language}.
 Focus: {"Local events within viewport" if is_local else "Globally significant events, but prioritize viewport region"}
 Max pins: {max_pins}
 
-{news_context}
-
-Generate pins for significant events on this date. For each event:
-1. Extract the event from the news articles (if available)
-2. Identify the EXACT location where it occurred
-3. Use accurate lat/lng coordinates for that location
+Generate pins for significant events on {date} (ONLY events from year {year}). For each event:
+1. Use web search to find the event - ensure the event date matches {date} exactly
+2. Identify the EXACT, SPECIFIC location where it occurred (e.g., "Marina Bay", "Times Square", "Westminster", NOT just "Singapore", "New York", "London")
+3. Use accurate lat/lng coordinates for that specific location
 4. Ensure the location is within or as close as possible to the viewport bbox
-5. If the event location is outside the viewport but relevant, place it at the closest relevant point within or near the viewport"""
+5. If the event location is outside the viewport but relevant, place it at the closest relevant point within or near the viewport
+6. location_label MUST be specific: use districts, neighborhoods, landmarks, or notable places, not just city/country names
+7. The "date" field in each pin MUST be exactly "{date}" - same year ({year}), month, and day
+8. Base your information on web search results from reliable sources"""
 
         try:
             # Call Gemini API
+            # Calculate token limit dynamically: ~600 tokens per pin, minimum 4000
+            token_limit = max(4000, max_pins * 600)
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=[
@@ -158,7 +190,8 @@ Generate pins for significant events on this date. For each event:
                 ],
                 config={
                     "temperature": 0.2,  # Low temperature for structured output
-                    "max_output_tokens": 4000,
+                    "max_output_tokens": token_limit,
+                    "tools": [{"google_search": {}}],  # Enable Google Search grounding
                 }
             )
             
@@ -193,10 +226,20 @@ Generate pins for significant events on this date. For each event:
             pins = []
             for pin_data in pins_data[:max_pins]:
                 try:
+                    # CRITICAL: Validate that the pin date matches the requested date exactly
+                    pin_date = pin_data.get("date", "")
+                    if pin_date != date:
+                        logger.warning(f"Skipping pin with mismatched date: pin_date={pin_date}, requested_date={date}")
+                        continue
+                    
                     # Validate and potentially geocode location
                     lat = pin_data.get("lat", 0)
                     lng = pin_data.get("lng", 0)
                     location_label = pin_data.get("location_label", "")
+                    
+                    # Check if location_label is too generic and try to make it more specific
+                    location_label = self._make_location_specific(location_label, viewport)
+                    pin_data["location_label"] = location_label
                     
                     # If coordinates seem invalid or location doesn't match, try geocoding
                     if (lat == 0 and lng == 0) or not self._is_in_viewport(lat, lng, viewport):
@@ -213,12 +256,21 @@ Generate pins for significant events on this date. For each event:
                         if geocoded:
                             pin_data["lat"] = geocoded["lat"]
                             pin_data["lng"] = geocoded["lng"]
+                            # Use geocoded display_name only if it's more specific than what we have
                             if geocoded.get("display_name"):
-                                pin_data["location_label"] = geocoded["display_name"]
+                                geocoded_name = geocoded["display_name"]
+                                # Prefer the geocoded name if it contains more detail
+                                if self._is_more_specific(geocoded_name, location_label):
+                                    pin_data["location_label"] = geocoded_name
+                                else:
+                                    pin_data["location_label"] = location_label
                     
                     # Ensure coordinates are within valid ranges
                     pin_data["lat"] = max(-90, min(90, pin_data.get("lat", 0)))
                     pin_data["lng"] = max(-180, min(180, pin_data.get("lng", 0)))
+                    
+                    # Ensure the date field matches exactly
+                    pin_data["date"] = date
                     
                     pin = Pin(**pin_data)
                     pins.append(pin)
@@ -236,7 +288,7 @@ Generate pins for significant events on this date. For each event:
             failed_text = text if 'text' in locals() else raw_text if 'raw_text' in locals() else ""
             
             # Try to extract valid pins from partial JSON
-            partial_pins = self._extract_partial_pins(failed_text)
+            partial_pins = self._extract_partial_pins(failed_text, required_date=date)
             if partial_pins:
                 logger.info(f"Extracted {len(partial_pins)} valid pins from partial JSON")
                 return partial_pins
@@ -246,10 +298,16 @@ Generate pins for significant events on this date. For each event:
             logger.debug(f"Failed JSON text (first 1000 chars): {failed_text[:1000] if isinstance(failed_text, str) else 'N/A'}")
             try:
                 fix_prompt = f"{user_prompt}\n\nThe previous response had invalid JSON. Please return ONLY valid JSON matching the schema, no markdown. Return a JSON object with a 'pins' array. Ensure all strings are properly escaped and closed. Do not include incomplete objects."
+                # Calculate token limit dynamically: ~600 tokens per pin, minimum 4000
+                token_limit = max(4000, max_pins * 600)
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=fix_prompt,
-                    config={"temperature": 0.1, "max_output_tokens": 4000}
+                    config={
+                        "temperature": 0.1,
+                        "max_output_tokens": token_limit,
+                        "tools": [{"google_search": {}}],  # Enable Google Search grounding
+                    }
                 )
                 raw_text = response.text.strip()
                 logger.info(f"Retry response length: {len(raw_text)} chars")
@@ -262,7 +320,7 @@ Generate pins for significant events on this date. For each event:
                     logger.error(f"Retry JSON parse error at line {retry_error.lineno}, col {retry_error.colno}: {retry_error.msg}")
                     logger.error(f"Retry problematic text around error (char {retry_error.pos}): {text[max(0, retry_error.pos-100):retry_error.pos+100]}")
                     # Try partial extraction one more time
-                    partial_pins = self._extract_partial_pins(text)
+                    partial_pins = self._extract_partial_pins(text, required_date=date)
                     if partial_pins:
                         logger.info(f"Extracted {len(partial_pins)} valid pins from retry partial JSON")
                         return partial_pins
@@ -278,8 +336,16 @@ Generate pins for significant events on this date. For each event:
                 
                 pins = []
                 for p in pins_data[:max_pins]:
+                    # CRITICAL: Validate that the pin date matches the requested date exactly
+                    pin_date = p.get("date", "")
+                    if pin_date != date:
+                        logger.warning(f"Skipping pin with mismatched date: pin_date={pin_date}, requested_date={date}")
+                        continue
+                    
                     if self._validate_pin(p):
                         try:
+                            # Ensure the date field matches exactly
+                            p["date"] = date
                             pins.append(Pin(**p))
                         except Exception as pin_error:
                             print(f"Warning: Failed to create pin: {pin_error}")
@@ -495,10 +561,14 @@ Generate pins for significant events on this date. For each event:
         
         return '\n'.join(fixed_lines)
     
-    def _extract_partial_pins(self, text: str) -> List[Pin]:
+    def _extract_partial_pins(self, text: str, required_date: str = None) -> List[Pin]:
         """
         Try to extract valid pin objects from partial/invalid JSON.
         Uses regex to find complete pin objects even if the overall JSON is invalid.
+        
+        Args:
+            text: Text containing JSON (possibly invalid)
+            required_date: If provided, only extract pins matching this exact date
         """
         pins = []
         
@@ -537,6 +607,15 @@ Generate pins for significant events on this date. For each event:
                     "related_event_ids": None
                 }
                 
+                # CRITICAL: Validate that the pin date matches the required date if specified
+                if required_date and pin_data.get("date", "") != required_date:
+                    logger.debug(f"Skipping partial pin with mismatched date: pin_date={pin_data.get('date')}, required_date={required_date}")
+                    continue
+                
+                # Ensure date matches if required_date is provided
+                if required_date:
+                    pin_data["date"] = required_date
+                
                 # Validate and create pin
                 if self._validate_pin(pin_data):
                     pins.append(Pin(**pin_data))
@@ -554,6 +633,68 @@ Generate pins for significant events on this date. For each event:
             viewport.bbox.west <= lng <= viewport.bbox.east
         )
     
+    def _make_location_specific(self, location_label: str, viewport: Viewport) -> str:
+        """
+        Try to make a generic location more specific.
+        
+        If location has fewer than 2 comma-separated parts, it's likely generic
+        (e.g., "Singapore" or "New York" instead of "Marina Bay, Singapore").
+        Try to geocode and get a more specific place name.
+        """
+        if not location_label:
+            return location_label
+        
+        # Check if location is generic (has fewer than 2 comma-separated parts)
+        parts = [p.strip() for p in location_label.split(",")]
+        is_generic = len(parts) < 2
+        
+        # If it's generic, try to geocode and get a more specific name
+        if is_generic:
+            try:
+                geocoded = self.geocoding_service.geocode_location(
+                    location_label,
+                    bbox={
+                        "west": viewport.bbox.west,
+                        "south": viewport.bbox.south,
+                        "east": viewport.bbox.east,
+                        "north": viewport.bbox.north,
+                    }
+                )
+                if geocoded and geocoded.get("display_name"):
+                    # Nominatim display_name format: "Place, District, City, Region, Country"
+                    # Extract a more specific part (first 2-3 components)
+                    display_name = geocoded["display_name"]
+                    geocoded_parts = [p.strip() for p in display_name.split(",")]
+                    # Take first 2-3 parts for specificity (e.g., "Marina Bay, Downtown Core, Singapore")
+                    if len(geocoded_parts) >= 2:
+                        # Combine first 2-3 parts for a specific but readable location
+                        specific_parts = geocoded_parts[:min(3, len(geocoded_parts))]
+                        return ", ".join(specific_parts)
+                    return display_name
+            except Exception as e:
+                logger.debug(f"Error making location specific: {e}")
+        
+        return location_label
+    
+    def _is_more_specific(self, name1: str, name2: str) -> bool:
+        """
+        Check if name1 is more specific than name2.
+        More specific = has more components (parts separated by commas).
+        """
+        if not name1 or not name2:
+            return False
+        
+        parts1 = [p.strip() for p in name1.split(",")]
+        parts2 = [p.strip() for p in name2.split(",")]
+        
+        # More specific if it has more parts, or same parts but longer
+        if len(parts1) > len(parts2):
+            return True
+        elif len(parts1) == len(parts2):
+            # Same number of parts, check if first part is more detailed
+            return len(parts1[0]) > len(parts2[0]) if parts1 and parts2 else False
+        return False
+    
     def stream_explanation(
         self,
         pin: Pin,
@@ -569,7 +710,7 @@ Generate pins for significant events on this date. For each event:
         Yields:
             Text chunks of the explanation
         """
-        prompt = f"""You are a knowledgeable history teacher explaining a significant event.
+        prompt = f"""You are a knowledgeable history teacher explaining a significant event to 1 person.
 
 Event:
 - Title: {pin.title}
@@ -579,11 +720,10 @@ Event:
 - Significance: {pin.significance_score}
 
 Provide a clear, educational explanation in {language} with this structure:
-1. One sentence summary
+1. TL;DR (1 sentence summary)
 2. What happened (2-3 bullets)
 3. Why it matters (2-3 bullets)
 4. Context (1-2 bullets)
-5. What to watch next (if current/recent event)
 
 Keep it concise (200-300 words). Use bullet points with • symbol."""
 

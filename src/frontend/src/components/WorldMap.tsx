@@ -77,6 +77,7 @@ export function WorldMap({
 
     // Handle viewport changes with debouncing
     const moveTimeoutRef = { current: null as NodeJS.Timeout | null };
+    const lastReportedViewportRef = { current: null as Viewport | null };
     const handleMove = () => {
       if (!map.current || isProgrammaticMoveRef.current) {
         isProgrammaticMoveRef.current = false;
@@ -99,6 +100,31 @@ export function WorldMap({
           },
           zoom: map.current.getZoom(),
         };
+        
+        // Only update if viewport changed significantly (prevent micro-movements)
+        const last = lastReportedViewportRef.current;
+        if (last) {
+          const lastCenter = [
+            (last.bbox.west + last.bbox.east) / 2,
+            (last.bbox.south + last.bbox.north) / 2,
+          ];
+          const newCenter = [
+            (newViewport.bbox.west + newViewport.bbox.east) / 2,
+            (newViewport.bbox.south + newViewport.bbox.north) / 2,
+          ];
+          
+          const centerChanged =
+            Math.abs(lastCenter[0] - newCenter[0]) > 0.01 ||
+            Math.abs(lastCenter[1] - newCenter[1]) > 0.01;
+          const zoomChanged = Math.abs(last.zoom - newViewport.zoom) > 0.1;
+          
+          // Only report if change is significant
+          if (!centerChanged && !zoomChanged) {
+            return;
+          }
+        }
+        
+        lastReportedViewportRef.current = newViewport;
         onViewportChange(newViewport);
       }, 500);
     };
@@ -142,6 +168,30 @@ export function WorldMap({
       return;
     }
 
+    // Get current map state to compare with target viewport
+    const currentBounds = map.current.getBounds();
+    const currentCenter = map.current.getCenter();
+    const currentZoom = map.current.getZoom();
+    
+    const targetCenter = [
+      (viewport.bbox.west + viewport.bbox.east) / 2,
+      (viewport.bbox.south + viewport.bbox.north) / 2,
+    ];
+    
+    // Check if map is already at the target position (within tolerance)
+    // Use larger thresholds to prevent micro-movements: 0.01 degrees ≈ 1km
+    const centerDistance = Math.sqrt(
+      Math.pow(currentCenter.lng - targetCenter[0], 2) +
+      Math.pow(currentCenter.lat - targetCenter[1], 2)
+    );
+    const zoomDiff = Math.abs(currentZoom - viewport.zoom);
+    
+    // If map is already close to target, don't animate
+    if (centerDistance < 0.01 && zoomDiff < 0.1) {
+      lastViewportRef.current = viewport;
+      return;
+    }
+
     // Check if previous viewport was the default/world viewport
     // (bbox covering entire world: west=-180, east=180, south=-90, north=90, zoom=2)
     const isWorldView = 
@@ -155,14 +205,10 @@ export function WorldMap({
       (prev.bbox.west + prev.bbox.east) / 2,
       (prev.bbox.south + prev.bbox.north) / 2,
     ];
-    const newCenter = [
-      (viewport.bbox.west + viewport.bbox.east) / 2,
-      (viewport.bbox.south + viewport.bbox.north) / 2,
-    ];
 
     const centerChanged =
-      Math.abs(prevCenter[0] - newCenter[0]) > 0.001 ||
-      Math.abs(prevCenter[1] - newCenter[1]) > 0.001;
+      Math.abs(prevCenter[0] - targetCenter[0]) > 0.01 ||
+      Math.abs(prevCenter[1] - targetCenter[1]) > 0.01;
     const zoomChanged = Math.abs(prev.zoom - viewport.zoom) > 0.1;
 
     // Always animate if transitioning from world view to specific location, or if viewport changed significantly
@@ -170,7 +216,7 @@ export function WorldMap({
 
     if (shouldAnimate) {
       console.log("Animating map to new viewport:", {
-        center: newCenter,
+        center: targetCenter,
         zoom: viewport.zoom,
         bbox: viewport.bbox,
         isTransitionFromWorldView: isWorldView,
@@ -179,7 +225,7 @@ export function WorldMap({
 
       isProgrammaticMoveRef.current = true;
       map.current.flyTo({
-        center: newCenter as [number, number],
+        center: targetCenter as [number, number],
         zoom: viewport.zoom,
         duration: 2000, // 2 second smooth animation
         essential: true,

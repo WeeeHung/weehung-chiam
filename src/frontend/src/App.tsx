@@ -65,6 +65,16 @@ function AppContent() {
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [relatedPinIds, setRelatedPinIds] = useState<string[]>([]);
   const [locationInitialized, setLocationInitialized] = useState(false);
+  const [canFetchEvents, setCanFetchEvents] = useState(false);
+
+  // Wait 2 seconds before allowing event fetching (to allow map animation to complete)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCanFetchEvents(true);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Request user location on mount
   useEffect(() => {
@@ -105,16 +115,36 @@ function AppContent() {
     );
   }, [locationInitialized]);
 
+  // Accumulate pins across all fetches (don't reset on new queries)
+  const [accumulatedPins, setAccumulatedPins] = useState<Pin[]>([]);
+
   // Fetch pins (viewport is already debounced in WorldMap component)
+  // Wait for initial delay to complete before fetching
   const { data: pinsData, isLoading: isLoadingPins } = usePins(
     date,
     viewport,
     language,
     8,
-    true
+    canFetchEvents
   );
 
-  const pins = pinsData?.pins || [];
+  // Merge new pins with accumulated pins (deduplicate by event_id)
+  useEffect(() => {
+    if (pinsData?.pins) {
+      setAccumulatedPins((prev) => {
+        const existingIds = new Set(prev.map((p) => p.event_id));
+        const newPins = pinsData.pins.filter((p) => !existingIds.has(p.event_id));
+        return [...prev, ...newPins];
+      });
+    }
+  }, [pinsData?.pins]);
+
+  // Reset accumulated pins when date changes
+  useEffect(() => {
+    setAccumulatedPins([]);
+  }, [date]);
+
+  const pins = accumulatedPins;
 
   // Handle pin click
   const handlePinClick = useCallback((pin: Pin) => {

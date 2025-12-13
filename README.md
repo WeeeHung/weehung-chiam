@@ -56,11 +56,10 @@ An interactive world map explorer that displays historical events and news as pi
 
    # Edit .env and add your API keys:
    # - GEMINI_API_KEY: Your Google Gemini API key (required)
-   # - NEWS_API_KEY: Your NewsAPI.org key (optional, get free at https://newsapi.org/)
    # - VITE_MAPBOX_TOKEN: Your Mapbox access token (required)
    #
-   # Note: NEWS_API_KEY is optional. If not provided, the system will use Gemini
-   # to generate historical events, but won't fetch real-time news articles.
+   # Note: The system uses Gemini's built-in web search capabilities to fetch
+   # real-time news and historical events. No additional news API is required.
    ```
 
 ### Running the Application

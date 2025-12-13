@@ -2,7 +2,7 @@
  * Language picker component.
  */
 
-import React from "react";
+import { Select } from "@mantine/core";
 
 interface LanguagePickerProps {
   value: string;
@@ -10,25 +10,38 @@ interface LanguagePickerProps {
 }
 
 const languages = [
-  { code: "en", name: "English" },
-  { code: "zh", name: "中文" },
-  { code: "es", name: "Español" },
-  { code: "fr", name: "Français" },
+  { value: "en", label: "English" },
+  { value: "zh", label: "中文" },
+  { value: "es", label: "Español" },
+  { value: "fr", label: "Français" },
 ];
 
 export function LanguagePicker({ value, onChange }: LanguagePickerProps) {
   return (
-    <select
+    <Select
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="language-picker"
-    >
-      {languages.map((lang) => (
-        <option key={lang.code} value={lang.code}>
-          {lang.name}
-        </option>
-      ))}
-    </select>
+      onChange={(val) => val && onChange(val)}
+      data={languages}
+      size="sm"
+      radius="md"
+      styles={{
+        input: {
+          background: "rgba(255, 255, 255, 0.6)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          border: "1px solid rgba(255, 255, 255, 0.2)",
+          transition: "all 0.2s ease",
+          "&:hover": {
+            background: "rgba(255, 255, 255, 0.8)",
+            borderColor: "rgba(255, 255, 255, 0.4)",
+          },
+          "&:focus": {
+            background: "rgba(255, 255, 255, 0.9)",
+            borderColor: "rgba(59, 130, 246, 0.5)",
+          },
+        },
+      }}
+    />
   );
 }
 

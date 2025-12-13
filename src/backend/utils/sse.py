@@ -17,9 +17,14 @@ def format_sse_event(event_type: str, data: str) -> str:
     Returns:
         Formatted SSE string
     """
-    # Escape newlines in data
-    data = data.replace("\n", "\\n")
-    return f"event: {event_type}\ndata: {data}\n\n"
+    # Preserve newlines by splitting into multiple data lines
+    # SSE spec allows multiple data: lines which are concatenated
+    lines = data.split("\n")
+    result = f"event: {event_type}\n"
+    for line in lines:
+        result += f"data: {line}\n"
+    result += "\n"
+    return result
 
 
 def stream_text_chunks(text_stream: Iterator[str]) -> Iterator[str]:

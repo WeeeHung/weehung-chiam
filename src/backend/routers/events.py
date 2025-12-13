@@ -4,7 +4,8 @@ Events API router for generating pins, explanations, and chat.
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 
 from ..models import PinsRequest, PinsResponse, ChatRequest, Pin
 from ..services.gemini import GeminiService
@@ -22,14 +23,41 @@ cache_service = CacheService()
 _pin_store: dict[str, Pin] = {}
 
 
+def _find_pin_in_cache(event_id: str, cache_service: CacheService) -> Optional[Pin]:
+    """
+    Search through cached pins to find a pin by event_id.
+    
+    This is a fallback when pin is not in _pin_store (e.g., after server restart).
+    """
+    # Search through all cache entries that might contain pins
+    # This is not ideal but works for MVP
+    for cache_key, (cached_value, expiry) in cache_service._cache.items():
+        if datetime.now() > expiry:
+            continue
+        
+        # Check if this is a pins cache entry (contains list of pins)
+        if isinstance(cached_value, list) and len(cached_value) > 0:
+            # Check if first item looks like a Pin
+            if hasattr(cached_value[0], 'event_id'):
+                # Search for the pin in this cached list
+                for pin in cached_value:
+                    if pin.event_id == event_id:
+                        # Found it! Store in _pin_store for future use
+                        _pin_store[event_id] = pin
+                        return pin
+    
+    return None
+
+
 @router.post("/pins", response_model=PinsResponse)
 async def generate_pins(request: PinsRequest) -> PinsResponse:
     """
     Generate event pins for a given date and viewport.
     
     Returns cached result if available, otherwise generates new pins.
+    Accumulates pins across different viewports for the same date.
     """
-    # Check cache
+    # Check viewport-specific cache first (for fast lookup)
     cache_key = cache_service.get_pins_key(
         date=request.date,
         bbox={
@@ -45,25 +73,46 @@ async def generate_pins(request: PinsRequest) -> PinsResponse:
     
     cached_pins = cache_service.get(cache_key)
     if cached_pins is not None:
+        # Store pins in _pin_store when returning from cache
+        # This ensures pins are available for explanation endpoint
+        for pin in cached_pins:
+            _pin_store[pin.event_id] = pin
+        
+        # Also ensure these pins are in the date-accumulated cache
+        cache_service.merge_and_set_date_pins(
+            request.date,
+            request.language,
+            cached_pins
+        )
+        
         return PinsResponse(date=request.date, pins=cached_pins)
     
     # Generate new pins
     try:
-        pins = gemini_service.generate_pins(
+        new_pins = gemini_service.generate_pins(
             date=request.date,
             viewport=request.viewport,
             language=request.language,
             max_pins=request.max_pins
         )
         
-        # Cache the result
-        cache_service.set_pins(cache_key, pins)
+        # Merge new pins with accumulated pins for this date
+        # This ensures pins are accumulated across different viewports
+        merged_pins = cache_service.merge_and_set_date_pins(
+            request.date,
+            request.language,
+            new_pins
+        )
+        
+        # Cache the viewport-specific result (for fast lookup next time)
+        cache_service.set_pins(cache_key, new_pins)
         
         # Store pins for later retrieval
-        for pin in pins:
+        for pin in merged_pins:
             _pin_store[pin.event_id] = pin
         
-        return PinsResponse(date=request.date, pins=pins)
+        # Return the merged pins (all accumulated pins for this date)
+        return PinsResponse(date=request.date, pins=merged_pins)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating pins: {str(e)}")
@@ -100,9 +149,15 @@ async def stream_explanation(event_id: str, language: str = "en"):
         )
     
     # Generate explanation
-    # Try to get pin from store, otherwise create minimal pin
+    # Try to get pin from store, otherwise search cache, otherwise create minimal pin
     try:
         pin = _pin_store.get(event_id)
+        
+        # If not in store, try to find it in cached pins
+        if not pin:
+            pin = _find_pin_in_cache(event_id, cache_service)
+        
+        # If still not found, create minimal pin from event_id
         if not pin:
             # Parse event_id to extract date and create minimal pin
             # Format: evt_YYYY-MM-DD_location_001
@@ -167,8 +222,14 @@ async def stream_chat(event_id: str, request: ChatRequest):
     Accepts question and chat history, returns SSE stream.
     """
     try:
-        # Try to get pin from store, otherwise create minimal pin
+        # Try to get pin from store, otherwise search cache, otherwise create minimal pin
         pin = _pin_store.get(event_id)
+        
+        # If not in store, try to find it in cached pins
+        if not pin:
+            pin = _find_pin_in_cache(event_id, cache_service)
+        
+        # If still not found, create minimal pin from event_id
         if not pin:
             # Parse event_id to create minimal pin
             parts = event_id.split("_")

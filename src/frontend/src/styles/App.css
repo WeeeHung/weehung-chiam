@@ -24,55 +24,41 @@ body {
 }
 
 .app {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   height: 100vh;
   width: 100vw;
 }
 
 /* App Shell */
 .app-shell {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  background: #fff;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 1400px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   z-index: 1000;
+  padding: 12px 24px;
 }
 
-.app-shell-left {
-  display: flex;
-  gap: 8px;
+@media (max-width: 768px) {
+  .app-shell {
+    width: calc(100% - 16px);
+    top: 8px;
+    padding: 10px 16px;
+  }
 }
 
-.nav-button {
-  background: none;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 18px;
-  transition: all 0.2s;
-}
-
-.nav-button:hover {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-}
-
-.app-shell-center h1 {
-  font-size: 18px;
-  font-weight: 500;
-  color: #111827;
-  text-transform: lowercase;
-}
-
-.app-shell-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.app-shell-title {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: #111827 !important;
 }
 
 .map-style-selector {
@@ -87,21 +73,25 @@ body {
 
 .map-style-select {
   padding: 6px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   cursor: pointer;
   font-size: 14px;
   min-width: 150px;
+  transition: all 0.2s ease;
 }
 
 .map-style-select:hover {
-  border-color: #d1d5db;
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .map-style-select:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.5);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -113,11 +103,19 @@ body {
 
 .language-picker {
   padding: 6px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   cursor: pointer;
   font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.language-picker:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .date-selector {
@@ -127,17 +125,26 @@ body {
 
 .date-picker {
   padding: 6px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   cursor: pointer;
   font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.date-picker:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 /* App Content */
 .app-content {
-  flex: 1;
   position: relative;
+  height: 100vh;
+  width: 100vw;
   overflow: hidden;
 }
 
@@ -357,11 +364,64 @@ body {
   color: #374151;
   font-size: 15px;
   line-height: 1.6;
-  white-space: pre-wrap;
 }
 
 .explanation-text {
   color: #374151;
+}
+
+/* Markdown styling */
+.explanation-text h1,
+.explanation-text h2,
+.explanation-text h3,
+.explanation-text h4 {
+  color: #111827;
+  font-weight: 600;
+  margin-top: 1.5em;
+}
+
+.explanation-text h1 {
+  font-size: 1.5em;
+}
+
+.explanation-text h2 {
+  font-size: 1.3em;
+}
+
+.explanation-text h3 {
+  font-size: 1.1em;
+}
+
+.explanation-text p {
+  margin-bottom: 1em;
+}
+
+.explanation-text ul,
+.explanation-text ol {
+  margin-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.explanation-text li {
+  margin-bottom: 0.5em;
+}
+
+.explanation-text strong {
+  font-weight: 600;
+  color: #111827;
+  background-color: #ffe066;
+}
+
+.explanation-text em {
+  font-style: italic;
+}
+
+.explanation-text code {
+  background-color: #f3f4f6;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
 }
 
 .loading {

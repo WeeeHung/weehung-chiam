@@ -194,7 +194,7 @@ async def stream_explanation(event_id: str, language: str = "en"):
                 chunks.append(chunk)
                 yield chunk
             
-            # Cache the full explanation
+            # Cache the full explanation text
             cache_service.set_explanation(cache_key, explanation_text)
         
         return StreamingResponse(

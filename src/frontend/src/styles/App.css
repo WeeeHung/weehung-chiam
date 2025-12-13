@@ -38,7 +38,7 @@ body {
   width: calc(100% - 32px);
   max-width: 1400px;
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
   -webkit-backdrop-filter: blur(12px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;
@@ -258,8 +258,19 @@ body {
 }
 
 .map-marker.selected {
-  border: 3px solid #000 !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3) !important;
+  transform: scale(1.15);
+  z-index: 20;
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6)) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  animation: pulse-selected 2s ease-in-out infinite;
+}
+
+@keyframes pulse-selected {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6)) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.8)) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  }
 }
 
 .map-marker.related {
@@ -364,6 +375,21 @@ body {
   color: #374151;
   font-size: 15px;
   line-height: 1.6;
+}
+
+.explanation-image {
+  margin-bottom: 20px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.explanation-image img {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 400px;
+  object-fit: cover;
 }
 
 .explanation-text {

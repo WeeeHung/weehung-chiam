@@ -7,6 +7,7 @@ Reuses Gemini client setup from the original executor.py.
 import os
 import json
 import re
+import base64
 import logging
 from typing import Iterator, List, Dict, Any, Optional
 from datetime import datetime
@@ -241,9 +242,11 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     location_label = self._make_location_specific(location_label, viewport)
                     pin_data["location_label"] = location_label
                     
-                    # If coordinates seem invalid or location doesn't match, try geocoding
-                    if (lat == 0 and lng == 0) or not self._is_in_viewport(lat, lng, viewport):
+                    # Only geocode if coordinates are invalid (0,0) - don't re-geocode based on viewport
+                    # This ensures pins use actual geographic coordinates that don't change when map moves
+                    if lat == 0 and lng == 0:
                         # Try to geocode the location
+                        # Use viewport bbox only as a preference (not a requirement) to help disambiguate
                         geocoded = self.geocoding_service.geocode_location(
                             location_label,
                             bbox={
@@ -701,16 +704,16 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         language: str = "en"
     ) -> Iterator[str]:
         """
-        Stream explanation for an event pin.
+        Stream a TLDR news article for an event pin.
         
         Args:
-            pin: Pin object to explain
+            pin: Pin object to write about
             language: Language code
             
         Yields:
-            Text chunks of the explanation
+            Text chunks of the news article
         """
-        prompt = f"""You are a knowledgeable history teacher explaining a significant event to 1 person.
+        prompt = f"""You are a professional news writer. Write a concise TLDR news article about this event. Include **bold** for important words.
 
 Event:
 - Title: {pin.title}
@@ -719,13 +722,14 @@ Event:
 - Category: {pin.category}
 - Significance: {pin.significance_score}
 
-Provide a clear, educational explanation in {language} with this structure:
-1. TL;DR (1 sentence summary)
-2. What happened (2-3 bullets)
-3. Why it matters (2-3 bullets)
-4. Context (1-2 bullets)
+Write a news article in {language} that reads like a brief news report. Include:
+- NO TITLE as title would be provided
+- A compelling headline-style opening paragraph (2-3 sentences)
+- Key facts about what happened
+- Why this event is significant
+- Relevant context
 
-Keep it concise (200-300 words). Use bullet points with • symbol."""
+Keep it concise (200-300 words). Write in a journalistic style as a TLDR - users can ask for more details if needed."""
 
         try:
             response = self.client.models.generate_content(

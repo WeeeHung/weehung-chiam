@@ -160,10 +160,13 @@ class GeocodingService:
                 "addressdetails": 1,
             }
             
-            # Add bbox to prioritize results within viewport
+            # Add bbox to prioritize results within viewport (but don't restrict to it)
+            # Using viewbox without bounded=1 allows Nominatim to prefer results in the area
+            # but still return actual geographic coordinates if the location is outside
             if bbox:
                 params["viewbox"] = f"{bbox['west']},{bbox['south']},{bbox['east']},{bbox['north']}"
-                params["bounded"] = 1
+                # Don't use bounded=1 - this would restrict results to viewport only
+                # We want actual geographic coordinates, not viewport-relative ones
             
             headers = {
                 "User-Agent": "Atlantis-WorldNews/1.0"  # Required by Nominatim

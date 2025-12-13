@@ -251,11 +251,12 @@ export function WorldMap({
     }
 
     // Update or add markers
-    pins.forEach((pin) => {
+    pins.forEach((pin, index) => {
       if (!map.current) return;
 
       const isSelected = pin.event_id === selectedPinId;
       const isRelated = relatedPinIds.includes(pin.event_id);
+      const pinIndex = index + 1; // 1-based index for display
 
       const existingMarker = currentMarkers.get(pin.event_id);
 
@@ -267,7 +268,17 @@ export function WorldMap({
 
         if (wasSelected !== isSelected || wasRelated !== isRelated) {
           markerEl.className = `map-marker ${isSelected ? "selected" : ""} ${isRelated ? "related" : ""}`;
-          markerEl.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
+          // Update border on the circle element (first child div)
+          const circleEl = markerEl.querySelector("div:first-child") as HTMLElement;
+          if (circleEl) {
+            circleEl.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
+          }
+        }
+
+        // Update index number if it changed
+        const indexEl = markerEl.querySelector(".pin-index") as HTMLElement;
+        if (indexEl) {
+          indexEl.textContent = pinIndex.toString();
         }
 
         // Update position if needed
@@ -276,21 +287,72 @@ export function WorldMap({
           existingMarker.setLngLat([pin.lng, pin.lat]);
         }
       } else {
-        // Create new marker element
-        const el = document.createElement("div");
-        el.className = `map-marker ${isSelected ? "selected" : ""} ${isRelated ? "related" : ""}`;
-        el.style.width = `${10 + pin.significance_score * 20}px`;
-        el.style.height = `${10 + pin.significance_score * 20}px`;
-        el.style.borderRadius = "50%";
-        el.style.backgroundColor = getCategoryColor(pin.category);
-        el.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
-        el.style.cursor = "pointer";
-        el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
-        el.style.transition = "opacity 0.2s ease-in-out";
-        el.title = pin.title;
+        // Create new marker element with pin shape
+        // Pin shape: circular top with pointed bottom
+        // All pins are the same size (not based on significance)
+        const size = 30; // Fixed size for all pins
+        const pinColor = getCategoryColor(pin.category);
+        
+        const wrapper = document.createElement("div");
+        wrapper.className = `map-marker ${isSelected ? "selected" : ""} ${isRelated ? "related" : ""}`;
+        wrapper.style.position = "relative";
+        wrapper.style.width = `${size * 1.3}px`;
+        wrapper.style.height = `${size * 1.6}px`;
+        wrapper.style.display = "flex";
+        wrapper.style.flexDirection = "column";
+        wrapper.style.alignItems = "center";
+        wrapper.style.cursor = "pointer";
+        
+        // Create circular top part
+        const circle = document.createElement("div");
+        circle.style.width = `${size}px`;
+        circle.style.height = `${size}px`;
+        circle.style.borderRadius = "50%";
+        circle.style.backgroundColor = pinColor;
+        circle.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
+        circle.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
+        circle.style.position = "relative";
+        circle.style.display = "flex";
+        circle.style.alignItems = "center";
+        circle.style.justifyContent = "center";
+        circle.style.zIndex = "2";
+        
+        // Create pointed bottom (triangle)
+        const point = document.createElement("div");
+        const pointSize = size * 0.25;
+        point.style.width = "0";
+        point.style.height = "0";
+        point.style.borderLeft = `${pointSize}px solid transparent`;
+        point.style.borderRight = `${pointSize}px solid transparent`;
+        point.style.borderTop = `${size * 0.4}px solid ${pinColor}`;
+        point.style.marginTop = `-${size * 0.15}px`; // Overlap with circle slightly
+        point.style.filter = "drop-shadow(0 2px 2px rgba(0,0,0,0.3))";
+        
+        // Create index number element
+        const indexEl = document.createElement("span");
+        indexEl.className = "pin-index";
+        indexEl.textContent = pinIndex.toString();
+        indexEl.style.color = "#ffffff";
+        indexEl.style.fontSize = `${Math.max(10, size * 0.4)}px`;
+        indexEl.style.fontWeight = "bold";
+        indexEl.style.textShadow = "0 1px 2px rgba(0,0,0,0.7)";
+        indexEl.style.userSelect = "none";
+        indexEl.style.pointerEvents = "none";
+        circle.appendChild(indexEl);
+        
+        wrapper.appendChild(circle);
+        wrapper.appendChild(point);
+        wrapper.title = pin.title;
+        
+        const el = wrapper;
 
+        // Create marker with anchor at bottom center (the pin point)
+        // This ensures the pin point aligns with the lat/lng coordinate
         const Marker = (mapboxgl as any).Marker;
-        const marker = new Marker(el)
+        const marker = new Marker({
+          element: el,
+          anchor: 'bottom', // Anchor at the bottom center of the pin (the point)
+        })
           .setLngLat([pin.lng, pin.lat])
           .addTo(map.current);
 

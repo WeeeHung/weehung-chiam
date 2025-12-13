@@ -8,6 +8,7 @@ import { AppShell } from "./components/AppShell";
 import { WorldMap } from "./components/WorldMap";
 import { EventDialog } from "./components/EventDialog";
 import { usePins } from "./hooks/useEvents";
+import { useLoadingMessage } from "./hooks/useLoadingMessage";
 import { Pin, Viewport } from "./types/events";
 import { MapStyle } from "./components/MapStylePicker";
 
@@ -128,6 +129,9 @@ function AppContent() {
     canFetchEvents
   );
 
+  // Streaming loading message
+  const loadingMessage = useLoadingMessage({ enabled: isLoadingPins });
+
   // Merge new pins with accumulated pins (deduplicate by event_id)
   useEffect(() => {
     if (pinsData?.pins) {
@@ -139,10 +143,13 @@ function AppContent() {
     }
   }, [pinsData?.pins]);
 
-  // Reset accumulated pins when date changes
+  // Reset accumulated pins when date or language changes
   useEffect(() => {
     setAccumulatedPins([]);
-  }, [date]);
+    // Also close any open dialog when resetting
+    setSelectedPin(null);
+    setRelatedPinIds([]);
+  }, [date, language]);
 
   const pins = accumulatedPins;
 
@@ -172,7 +179,7 @@ function AppContent() {
       />
       <div className="app-content">
         <div className="map-container">
-          {isLoadingPins && <div className="loading-overlay">Loading events...</div>}
+          {isLoadingPins && <div className="loading-overlay">{loadingMessage}</div>}
           {!hasMapboxToken ? (
             <div className="map-error-overlay">
               <div className="map-error-message">

@@ -72,6 +72,11 @@ export function usePins(
     lng: number;
   } | null>(null);
 
+  // Reset stabilized center when date or language changes (fresh start)
+  useEffect(() => {
+    setStabilizedCenter(null);
+  }, [date, language]);
+
   // Update stabilized center when current center moves more than threshold
   useEffect(() => {
     if (!stabilizedCenter) {

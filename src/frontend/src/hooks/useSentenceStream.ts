@@ -31,7 +31,7 @@ export function useSentenceStream(
   const bufferRef = useRef("");
   const sentenceQueueRef = useRef<string[]>([]);
   const isProcessingQueueRef = useRef(false);
-  const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const animationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSentenceRef = useRef(onSentence);
   const onDoneRef = useRef(onDone);
 
@@ -82,8 +82,11 @@ export function useSentenceStream(
   }, [animationDelay]);
 
   const handleChunk = useCallback((chunk: string) => {
-    // Add chunk to buffer
-    bufferRef.current += chunk;
+    // Handle plain text chunks
+    const textChunk = chunk;
+
+    // Add text chunk to buffer
+    bufferRef.current += textChunk;
 
     // Process buffer to find complete sentences
     let remaining = bufferRef.current;

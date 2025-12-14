@@ -3,6 +3,7 @@ Events API router for generating pins, explanations, and chat.
 """
 
 import os
+import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
 from typing import List, Optional, Dict
@@ -12,10 +13,13 @@ import asyncio
 import base64
 import io
 
-from ..models import PinsRequest, PinsResponse, ChatRequest, Pin
+logger = logging.getLogger(__name__)
+
+from ..models import PinsRequest, PinsResponse, ChatRequest, Pin, ParseCommandRequest, ParseCommandResponse
 from ..services.gemini import GeminiService
 from ..services.cache import CacheService
 from ..utils.sse import stream_text_chunks
+from google.genai import types
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -124,6 +128,114 @@ async def generate_pins(request: PinsRequest) -> PinsResponse:
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating pins: {str(e)}")
+
+
+@router.post("/parse-command", response_model=ParseCommandResponse)
+async def parse_command(request: ParseCommandRequest):
+    """
+    Parse voice command to extract location (with geocoding), language, and date.
+    Uses Gemini Flash for accurate entity extraction, then geocodes the location.
+    """
+    from datetime import datetime, timedelta
+    from ..services.news import GeocodingService
+    
+    geocoding_service = GeocodingService()
+    
+    # Get current date for relative date handling
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    
+    # System prompt for extraction
+    system_instruction = """You are a command parser that extracts location name, language code, and date from user voice commands. 
+    The user may mention an event or a news article, deduce the most likely intention and extract the location name, language code, and date accordingly.
+
+Extract:
+1. LOCATION_NAME: The place/city/country mentioned (e.g., "Tokyo", "New York", "Johor Bahru"). Return just the location name, nothing else.
+2. LANGUAGE: 2-letter ISO code (en, zh, ja, es, fr, de, ko, pt, ru, ar, hi) - extract from phrases like "in chinese" or infer from context
+3. DATE: YYYY-MM-DD format - handle "today", "yesterday", or parse specific dates
+
+Return ONLY valid JSON with this exact structure:
+{
+  "location_name": "string or null",
+  "language": "string or null", 
+  "date": "YYYY-MM-DD or null"
+}"""
+    
+    user_prompt = f"""Parse this voice command:
+
+Command: "{request.text}"
+
+Current date: {today.strftime('%Y-%m-%d')}
+Yesterday: {yesterday.strftime('%Y-%m-%d')}
+
+Extract location_name, language, and date. Return JSON only."""
+    
+    try:
+        # Call Gemini Flash (fastest model)
+        response = gemini_service.client.models.generate_content(
+            model="gemini-2.0-flash-exp",  # Fastest model
+            contents=[
+                {"role": "user", "parts": [{"text": system_instruction}]},
+                {"role": "user", "parts": [{"text": user_prompt}]}
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.1,  # Low temperature for consistent extraction
+                response_modalities=["TEXT"],
+                max_output_tokens=200,
+            )
+        )
+        
+        # Extract JSON from response
+        response_text = response.text.strip()
+        
+        # Remove markdown code blocks if present
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        # Parse JSON
+        parsed = json.loads(response_text)
+        
+        location_name = parsed.get("location_name")
+        language = parsed.get("language")
+        date = parsed.get("date")
+        
+        # Geocode location if found
+        location_result = None
+        if location_name and location_name.lower() not in ["null", "none", ""]:
+            try:
+                geocoded = geocoding_service.geocode_location(location_name)
+                if geocoded:
+                    location_result = {
+                        "lat": geocoded["lat"],
+                        "lng": geocoded["lng"],
+                        "name": geocoded.get("display_name", location_name)
+                    }
+            except Exception as e:
+                logger.warning(f"Geocoding failed for '{location_name}': {e}")
+        
+        # Clean up language and date
+        if language and language.lower() in ["null", "none", ""]:
+            language = None
+        if date and date.lower() in ["null", "none", ""]:
+            date = None
+        
+        return ParseCommandResponse(
+            location=location_result,
+            language=language,
+            date=date
+        )
+    
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON from Gemini response: {e}")
+        logger.debug(f"Response text: {response_text}")
+        # Fallback: return empty response
+        return ParseCommandResponse()
+    except Exception as e:
+        logger.error(f"Error parsing command: {str(e)}")
+        # Return empty response on error
+        return ParseCommandResponse()
 
 
 @router.get("/{event_id}/explain/stream")

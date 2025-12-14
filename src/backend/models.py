@@ -89,3 +89,24 @@ class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
 
+
+class ParseCommandRequest(BaseModel):
+    """Request to parse voice command and extract location, language, and date."""
+    text: str = Field(..., description="Transcribed voice command text")
+
+
+class ParseCommandResponse(BaseModel):
+    """Response containing extracted location, language, and date."""
+    location: Optional[dict] = Field(
+        default=None,
+        description="Location with lat/lng coordinates, or None if not found"
+    )
+    language: Optional[str] = Field(
+        default=None,
+        description="Language code (en, zh, es, fr, etc.), or None if not found"
+    )
+    date: Optional[str] = Field(
+        default=None,
+        description="Date in YYYY-MM-DD format, or None if not found"
+    )
+

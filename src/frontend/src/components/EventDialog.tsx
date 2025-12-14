@@ -12,8 +12,10 @@ import { AudioRecorder } from "../lib/audio-recorder";
 
 interface EventDialogProps {
   pin: Pin | null;
+  allPins: Pin[];
   language: string;
   onClose: () => void;
+  onPinChange?: (pin: Pin) => void;
   onStateChange?: (state: {
     connectionStatus: "idle" | "connecting" | "connected" | "error";
     isPlaying: boolean;
@@ -23,7 +25,7 @@ interface EventDialogProps {
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
-export function EventDialog({ pin, language, onClose, onStateChange }: EventDialogProps) {
+export function EventDialog({ pin, allPins, language, onClose, onPinChange, onStateChange }: EventDialogProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
   const hasSentInitialIntroRef = useRef(false);
   const shouldAutoStartRef = useRef(false);
@@ -255,6 +257,11 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     };
   }, [connected, client]);
 
+  // Reset initial intro flag when pin changes (including navigation)
+  useEffect(() => {
+    hasSentInitialIntroRef.current = false;
+  }, [pin?.event_id]);
+
   // Cleanup on unmount or pin change
   useEffect(() => {
     return () => {
@@ -305,37 +312,100 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     return parseInt(parts[parts.length - 1]);
   }
 
+  // Navigation logic
+  const handleNavigate = async (direction: "prev" | "next") => {
+    if (!pin || !onPinChange || allPins.length === 0) return;
+
+    const currentIndex = allPins.findIndex((p) => p.event_id === pin.event_id);
+    if (currentIndex === -1) return;
+
+    let newIndex: number;
+    if (direction === "prev") {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : allPins.length - 1;
+    } else {
+      newIndex = currentIndex < allPins.length - 1 ? currentIndex + 1 : 0;
+    }
+
+    const newPin = allPins[newIndex];
+    if (newPin) {
+      // Disconnect current session and reset state before navigating
+      await disconnect();
+      hasSentInitialIntroRef.current = false;
+      setConnectionStatus("idle");
+      onPinChange(newPin);
+    }
+  };
+
+  // Calculate if previous/next navigation is available (always show when multiple pins, with wrap-around)
+  const hasMultiplePins = allPins.length > 1;
+  const hasPrevious = hasMultiplePins;
+  const hasNext = hasMultiplePins;
+
   if (!pin) return null;
 
   return (
     <div className="event-dialog-overlay" onClick={onClose}>
-      <div className="event-dialog" onClick={(e) => e.stopPropagation()}>
-        <button className="event-dialog-close" onClick={onClose}>
-          ×
-        </button>
+      <div className="event-dialog-wrapper" onClick={(e) => e.stopPropagation()}>
+        <div className="event-dialog">
+          <button className="event-dialog-close" onClick={onClose}>
+            ×
+          </button>
 
-        <h2>
-          <span style={{ background: "#ffe066", color: "#111", borderRadius: "5px", padding: "2px 7px", marginRight: "8px", fontWeight: 700, fontFamily: "monospace" }}>
-            #{get_number_from_event_id(pin.event_id)}
-          </span>
-          {pin.title}
-        </h2>
-        <p className="event-location">{pin.location_label}</p>
-        <p className="event-date">{pin.date}</p>
+          <h2>
+            <span style={{ background: "#ffe066", color: "#111", borderRadius: "5px", padding: "2px 7px", marginRight: "8px", fontWeight: 700, fontFamily: "monospace" }}>
+              #{get_number_from_event_id(pin.event_id)}
+            </span>
+            {pin.title}
+          </h2>
+          <p className="event-location">{pin.location_label}</p>
+          <p className="event-date">{pin.date}</p>
 
-        <div className="event-explanation">
-          <div className="explanation-content">
-            {isExplaining && !explanation ? (
-              <div className="loading">Loading article...</div>
-            ) : (
-              <div className="explanation-text">
-                <ReactMarkdown remarkPlugins={[remarkBreaks]}>
-                  {explanation}
-                </ReactMarkdown>
-              </div>
-            )}
+          <div className="event-explanation">
+            <div className="explanation-content">
+              {isExplaining && !explanation ? (
+                <div className="loading">Loading article...</div>
+              ) : (
+                <div className="explanation-text">
+                  <ReactMarkdown remarkPlugins={[remarkBreaks]}>
+                    {explanation}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Navigation arrows */}
+        {hasPrevious && (
+          <button
+            className="event-dialog-nav-arrow event-dialog-nav-arrow-left"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleNavigate("prev");
+            }}
+            aria-label="Previous event"
+            title="Previous event"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6"/>
+            </svg>
+          </button>
+        )}
+        {hasNext && (
+          <button
+            className="event-dialog-nav-arrow event-dialog-nav-arrow-right"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleNavigate("next");
+            }}
+            aria-label="Next event"
+            title="Next event"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6"/>
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -68,8 +68,7 @@ An interactive world map explorer that displays historical events and news as pi
 
    ```bash
    # From project root
-   cd src/backend
-   python -m uvicorn main:app --reload --port 8000
+   uvicorn src.backend.main:app --reload
    ```
 
    The API will be available at `http://localhost:8000`
@@ -137,8 +136,7 @@ src/
 
 ```bash
 # Run with auto-reload
-cd src/backend
-python -m uvicorn main:app --reload
+uvicorn src.backend.main:app --reload
 ```
 
 ### Frontend Development

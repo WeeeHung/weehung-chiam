@@ -8,6 +8,7 @@ import { AppShell } from "./components/AppShell";
 import { WorldMap } from "./components/WorldMap";
 import { EventDialog } from "./components/EventDialog";
 import { AtlantisBar } from "./components/AtlantisBar";
+import { WelcomeModal } from "./components/WelcomeModal";
 import { usePins } from "./hooks/useEvents";
 import { useLoadingMessage } from "./hooks/useLoadingMessage";
 import { Pin, Viewport } from "./types/events";
@@ -57,6 +58,7 @@ function createViewportFromLocation(lat: number, lng: number, zoom: number = 10)
 }
 
 function AppContent() {
+  const [welcomeCompleted, setWelcomeCompleted] = useState(false);
   const [date, setDate] = useState(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -207,6 +209,15 @@ function AppContent() {
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN;
   const hasMapboxToken = mapboxToken && mapboxToken !== "YOUR_MAPBOX_TOKEN" && mapboxToken.trim() !== "";
 
+  // Show welcome modal first
+  if (!welcomeCompleted) {
+    return (
+      <div className="app">
+        <WelcomeModal onComplete={() => setWelcomeCompleted(true)} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <AppShell
@@ -251,11 +262,20 @@ function AppContent() {
       {selectedPin && (
         <EventDialog
           pin={selectedPin}
+          allPins={pins}
           language={language}
           onClose={() => {
             setSelectedPin(null);
             setRelatedPinIds([]);
             setEventDialogState(null);
+          }}
+          onPinChange={(newPin) => {
+            setSelectedPin(newPin);
+            if (newPin.related_event_ids && newPin.related_event_ids.length > 0) {
+              setRelatedPinIds(newPin.related_event_ids);
+            } else {
+              setRelatedPinIds([]);
+            }
           }}
           onStateChange={setEventDialogState}
         />

@@ -6,7 +6,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { geocodeLocation } from "../utils/geocoding";
 import { Viewport } from "../types/events";
 
 interface AtlantisBarProps {
@@ -30,102 +29,42 @@ interface AtlantisBarProps {
   currentLanguage: string;
 }
 
-// Language code mapping
-const LANGUAGE_MAP: Record<string, string> = {
-  "english": "en",
-  "chinese": "zh",
-  "japanese": "ja",
-  "spanish": "es",
-  "french": "fr",
-  "german": "de",
-  "korean": "ko",
-  "portuguese": "pt",
-  "russian": "ru",
-  "arabic": "ar",
-  "hindi": "hi",
-  // Add more as needed
-};
-
 /**
- * Parse voice command to extract location, language, and date.
- * Returns parsed entities or null if no valid command detected.
+ * Map ISO 639-1 language codes to BCP-47 locale codes for Web Speech API.
+ * The Web Speech API requires BCP-47 codes (e.g., "en-US", "zh-CN") for proper recognition.
  */
-function parseVoiceCommand(text: string): {
-  location?: string;
-  language?: string;
-  date?: string;
-} | null {
-  const lowerText = text.toLowerCase().trim();
+function getSpeechRecognitionLanguage(isoCode: string): string {
+  // Get browser's preferred language as fallback
+  const browserLang = navigator.language || (navigator as any).userLanguage || "en-US";
   
-  // Skip if too short or doesn't contain relevant keywords
-  if (lowerText.length < 3) return null;
+  // Map ISO 639-1 codes to BCP-47 codes
+  const speechLangMap: Record<string, string> = {
+    "en": "en-US",
+    "zh": "zh-CN",
+    "ja": "ja-JP",
+    "es": "es-ES",
+    "fr": "fr-FR",
+    "de": "de-DE",
+    "ko": "ko-KR",
+    "pt": "pt-BR",
+    "ru": "ru-RU",
+    "ar": "ar-SA",
+    "hi": "hi-IN",
+  };
   
-  const result: { location?: string; language?: string; date?: string } = {};
-  
-  // Extract language (e.g., "in chinese", "in japanese")
-  const languageMatch = lowerText.match(/\bin\s+(\w+)/);
-  if (languageMatch) {
-    const langName = languageMatch[1];
-    if (LANGUAGE_MAP[langName]) {
-      result.language = LANGUAGE_MAP[langName];
-    }
+  // Use mapped code if available, otherwise try browser language
+  const mapped = speechLangMap[isoCode];
+  if (mapped) {
+    return mapped;
   }
   
-  // Extract date patterns (e.g., "today", "yesterday", specific dates)
-  if (lowerText.includes("today")) {
-    const today = new Date();
-    result.date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  } else if (lowerText.includes("yesterday")) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    result.date = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+  // Fallback: if browser language matches the base language, use it
+  if (browserLang.startsWith(isoCode + "-")) {
+    return browserLang;
   }
   
-  // Extract location - look for patterns like "check out {location}", "go to {location}", or just "{location}"
-  let locationMatch: RegExpMatchArray | null = null;
-  
-  // Pattern 1: "check out {location}" or "let's check out {location}"
-  locationMatch = lowerText.match(/(?:let'?s\s+)?check\s+out\s+(.+?)(?:\s+in\s+\w+)?(?:\s+today)?$/i);
-  if (!locationMatch) {
-    // Pattern 2: "go to {location}"
-    locationMatch = lowerText.match(/go\s+to\s+(.+?)(?:\s+in\s+\w+)?(?:\s+today)?$/i);
-  }
-  if (!locationMatch) {
-    // Pattern 3: "{location} in {language}"
-    locationMatch = lowerText.match(/(.+?)\s+in\s+(\w+)/);
-    if (locationMatch) {
-      const langName = locationMatch[2];
-      if (LANGUAGE_MAP[langName]) {
-        result.language = LANGUAGE_MAP[langName];
-      }
-      locationMatch = [null as unknown as string, locationMatch[1]]; // Extract location part
-    }
-  }
-  if (!locationMatch) {
-    // Pattern 4: Just a location name (simple case - take first substantial word sequence)
-    const words = lowerText.split(/\s+/).filter(w => 
-      w.length > 2 && 
-      !["in", "out", "to", "go", "check", "lets", "let's", "today", "yesterday"].includes(w)
-    );
-    if (words.length > 0) {
-      result.location = words.join(" ");
-    }
-  } else if (locationMatch[1]) {
-    // Extract location from matched pattern
-    let location = locationMatch[1].trim();
-    // Remove language and date keywords if present
-    location = location.replace(/\s+in\s+\w+$/i, "").replace(/\s+today$/i, "").trim();
-    if (location) {
-      result.location = location;
-    }
-  }
-  
-  // Return null if no useful information extracted
-  if (!result.location && !result.language && !result.date) {
-    return null;
-  }
-  
-  return result;
+  // Final fallback: use browser language or default to en-US
+  return browserLang || "en-US";
 }
 
 /**
@@ -176,7 +115,11 @@ export function AtlantisBar({
     const recognitionInstance = new SpeechRecognition();
     recognitionInstance.continuous = false;
     recognitionInstance.interimResults = false;
-    recognitionInstance.lang = currentLanguage === "zh" ? "zh-CN" : currentLanguage;
+    
+    // Use proper BCP-47 language code for better recognition accuracy
+    const speechLang = getSpeechRecognitionLanguage(currentLanguage);
+    recognitionInstance.lang = speechLang;
+    console.log(`Speech recognition language set to: ${speechLang} (from currentLanguage: ${currentLanguage})`);
 
     recognitionInstance.onstart = () => {
       console.log("Speech recognition started");
@@ -190,43 +133,69 @@ export function AtlantisBar({
       setIsListening(false);
       setIsProcessing(true);
 
-      // Parse command
-      const parsed = parseVoiceCommand(transcript);
-      
-      if (!parsed) {
-        console.log("No valid command detected in:", transcript);
-        setIsProcessing(false);
-        return;
-      }
+      try {
+        // Call backend API to parse command using Gemini
+        const response = await fetch("/api/events/parse-command", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: transcript }),
+        });
 
-      console.log("Parsed command:", parsed);
-
-      // Handle language change
-      if (parsed.language && onLanguageChange) {
-        onLanguageChange(parsed.language);
-      }
-
-      // Handle date change
-      if (parsed.date && onDateChange) {
-        onDateChange(parsed.date);
-      }
-
-      // Handle location navigation
-      if (parsed.location && onNavigateToLocation) {
-        try {
-          const geocoded = await geocodeLocation(parsed.location);
-          if (geocoded) {
-            const viewport = createViewportFromLocation(geocoded.lat, geocoded.lng, 11);
-            onNavigateToLocation(viewport);
-          } else {
-            console.error(`Could not geocode location: ${parsed.location}`);
-          }
-        } catch (error) {
-          console.error("Error geocoding location:", error);
+        if (!response.ok) {
+          throw new Error(`API error: ${response.statusText}`);
         }
-      }
 
-      setIsProcessing(false);
+        const parsed = await response.json();
+        console.log("Parsed command:", parsed);
+
+        // Handle location navigation (with lat/lng from geocoding)
+        if (parsed.location && parsed.location.lat && parsed.location.lng && onNavigateToLocation) {
+          const viewport = createViewportFromLocation(parsed.location.lat, parsed.location.lng, 11);
+          onNavigateToLocation(viewport);
+        }
+
+        // Handle language change
+        if (parsed.language && onLanguageChange) {
+          onLanguageChange(parsed.language);
+        }
+
+        // Handle date change
+        if (parsed.date && onDateChange) {
+          onDateChange(parsed.date);
+        }
+
+        // Log if nothing was extracted
+        if (!parsed.location && !parsed.language && !parsed.date) {
+          console.log("No valid entities extracted from:", transcript);
+        }
+
+      } catch (error) {
+        console.error("Error parsing command:", error);
+        // Fallback: try to extract just location name for geocoding
+        // (simple fallback if API fails)
+        const words = transcript.toLowerCase().trim().split(/\s+/).filter((w: string): boolean => 
+          w.length > 2 && 
+          !["want", "yesterday", "today", "news", "for", "to", "the", "a", "an", "in", "at", "on"].includes(w)
+        );
+        if (words.length > 0 && words.length <= 3 && onNavigateToLocation) {
+          // Try basic geocoding as fallback
+          try {
+            const { geocodeLocation } = await import("../utils/geocoding");
+            const locationName = words.slice(0, 3).join(" ");
+            const geocoded = await geocodeLocation(locationName);
+            if (geocoded) {
+              const viewport = createViewportFromLocation(geocoded.lat, geocoded.lng, 11);
+              onNavigateToLocation(viewport);
+            }
+          } catch (fallbackError) {
+            console.error("Fallback geocoding also failed:", fallbackError);
+          }
+        }
+      } finally {
+        setIsProcessing(false);
+      }
     };
 
     recognitionInstance.onerror = (event: any) => {
@@ -327,10 +296,10 @@ export function AtlantisBar({
     if (isProcessing) {
       displayText = "Processing command...";
     } else if (isListening) {
-      displayText = "Listening... (release space to finish)";
+      displayText = "Listening... (release `Spacebar` to finish)";
       isGlowing = true;
     } else {
-      displayText = "Press space to talk";
+      displayText = "Press `Spacebar` to talk";
     }
   }
 

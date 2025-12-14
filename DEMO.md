@@ -1,127 +1,115 @@
 # Demo Video
 
-This demo showcases the Atlantis World News/History Map Explorer - an AI-powered interactive map that displays historical events and current news using a Planner-Executor-Memory agent architecture with Google Gemini API integration.
+This demo showcases Atlantis - an AI-powered spatial explorer that organizes the world's history and news by geography, transforming abstract headlines into personal journeys through an interactive map. The system uses a Planner-Executor-Memory agent architecture with Google Gemini API integration, including Gemini Live API for conversational interactions.
 
 ## Video Link
 
 **📺 Public Video Link:**
 
 ```
-TO INSERT LINK AFTER I finish filming.
+https://www.loom.com/share/57888dd26d304879bba5b996716b9aa9
 ```
 
 ## Demo Overview
 
-The demo walks through the complete agent workflow, showing how user interactions trigger the Planner-Executor-Memory agent to:
+The demo demonstrates how Atlantis addresses information isolation by anchoring news and historical events to physical spaces. The walkthrough shows:
 
-1. Plan sub-tasks based on user input
-2. Execute tasks using tools (Gemini API, geocoding)
-3. Store results in memory (cache)
-4. Return responses to the user
+1. Interactive news reporting with AI-powered conversations
+2. Spatial exploration of events through map navigation
+3. Real-time article generation with web search integration
+4. Intelligent caching and memory management
+5. Multilingual support for global accessibility
+6. Random event discovery through dice feature
 
 ## Timestamps
 
-### 00:00–00:30 — Introduction & Setup
-
-**What to show:**
-
-- Brief introduction to Atlantis (world news/history map explorer)
-- Show the interactive map interface
-- Demonstrate key UI components:
-  - Mapbox map with zoom/pan controls
-  - Date picker for selecting date ranges
-  - Language selector (English, Chinese, Spanish, French, etc.)
-  - Voice command interface (Atlantis Bar)
-- Explain the problem: Exploring world events and history on an interactive map
-- Highlight the AI agent architecture (Planner-Executor-Memory pattern)
+### 00:00–00:13 — Problem Introduction
 
 **Key Points:**
 
-- User-friendly interface for exploring world events
-- Multi-language support
-- Voice commands for natural interaction
-- Real-time event discovery powered by Gemini API
+- **Problem solved**: Addresses information isolation caused by algorithmic echo chambers that trap users in filtered content bubbles
+- Loss of spatial and temporal context ("where and when") in traditional news consumption
+- Sets the foundation for geographic, agent-driven approach to news and history exploration
 
-### 00:30–01:30 — User Input → Planning
-
-**What to show:**
-
-- Select a date range (e.g., "January 1-7, 2024" or historical dates)
-- Show how the viewport (map bounds) affects event selection
-- Demonstrate zoom levels:
-  - Zoomed in: Shows local/regional events
-  - Zoomed out: Shows globally significant events
-- **Agent Planning Step** (explain what's happening behind the scenes):
-  - User selects date → API receives request
-  - Agent Planner breaks down into tasks:
-    1. `search_events`: Use Gemini to find events (with web search)
-    2. `geocode_locations`: Convert location names to coordinates
-    3. `validate_pins`: Validate dates and coordinates
-  - Show or mention cache check (memory retrieval)
+### 00:13–00:46 — Atlantis Introduction & Spatial Concept
 
 **Key Points:**
 
-- User input triggers agent workflow
-- Planner decomposes goal into dependent tasks
-- Tasks use different tools (Gemini, geocoding)
-- Memory (cache) checked first for efficiency
+- **Problem solved**: Transforms abstract headlines into personal journeys by anchoring data to physical space
+- Core solution: Geographic organization of news and history instead of traditional field-based categorization
+- Voice-powered interaction enables natural exploration through agent-driven conversations
+- Personal connection established through home location anchoring, making global events locally relevant
 
-### 01:30–02:30 — Tool Calls & Memory
-
-**What to show:**
-
-- **Tool Execution** (if possible, show backend logs or explain):
-  - Gemini API call with web search to discover real events
-  - Show events appearing on the map as pins
-  - Explain how Gemini uses Google Search tool to find current/historical events
-  - Geocoding service converting location names to map coordinates
-  - Validation ensuring events match date range
-- **Memory/Caching**:
-  - First request: Cache miss, calls APIs
-  - Second request (same parameters): Cache hit, instant response
-  - Show or explain date range accumulation (merging pins across viewports)
-- **Streaming Responses**:
-  - Click on an event pin
-  - Show explanation streaming in real-time (SSE)
-  - Demonstrate how explanation is cached for future use
+### 00:46–01:28 — Interactive News Reporting & AI Conversation
 
 **Key Points:**
 
-- Gemini API uses web search for real-time event discovery
-- Geocoding service (Nominatim) converts locations to coordinates
-- Memory (cache) stores results to avoid redundant API calls
-- Streaming explanations provide real-time feedback
-- Multiple tools work together (Gemini → Geocoding → Validation)
+- **End-to-end agent behavior**: User explores news near home → Agent plans search tasks → Executes web search tool calls → Generates article → Provides conversational interface
+- **Agentic steps demonstrated**:
+  - **Planning**: Agent breaks down "explore news near me" into location-based search tasks
+  - **Tool calls**: Gemini API with web search retrieves real-time event information (e.g., Singapore Christmas Market)
+  - **Memory use**: Conversation context maintained for follow-up questions (e.g., "What's the price?")
+- **Problem solved**: Provides personalized, conversational news delivery instead of passive reading
+- Real-time article generation with web search ensures current, accurate information
 
-### 02:30–03:30 — Final Output & Edge Case Handling
-
-**What to show:**
-
-- **Final Output**:
-  - Event pins displayed on map with different categories (politics, conflict, culture, science, economics)
-  - Click pin to see detailed explanation
-  - Show Q&A feature: Ask questions about events, get AI-powered responses
-  - Demonstrate multi-language support (switch language, see events/explanations in different language)
-- **Edge Cases & Advanced Features**:
-  - Voice command parsing: Speak a command (e.g., "Show me events in Tokyo in December 2024")
-  - Random event feature: Discover random historic events
-  - Date validation: Show events are filtered to requested date range
-  - Zoom-aware events: Zoom in/out to see different event granularity
-  - Error handling: Show graceful handling of geocoding failures or API errors
-  - WebSocket chat: Live conversation with event context (if time permits)
+### 01:28–02:13 — Web Search, Caching & Map Navigation
 
 **Key Points:**
 
-- Rich output: Pins, explanations, Q&A, multi-language support
-- Edge cases handled gracefully (missing locations, API errors)
-- Advanced features: Voice commands, random events, live chat
-- Agent architecture ensures reliable, structured responses
+- **End-to-end agent behavior**: Voice command "What happened in San Francisco in March 2020?" → Agent plans location/date search → Executes web search tool → Geocodes location → Validates events → Caches results → Displays on map
+- **Agentic steps highlighted**:
+  - **Planning**: Agent decomposes voice query into search_events, geocode_locations, and validate_pins tasks
+  - **Tool calls**: Gemini API with web search, geocoding service (Nominatim), and validation tools work in sequence
+  - **Memory use**: "This conversation will also be caching memory" - agent stores results to avoid redundant API calls on repeat queries
+- **Problem solved**: Enables exploration beyond home country through intuitive map navigation and voice commands
+- Agent architecture intelligently handles memory and context across conversations
+
+### 02:13–02:59 — Pin Color System & Event Analysis
+
+**Key Points:**
+
+- **Agentic steps**: Agent performs sentiment analysis during event processing, categorizing events as positive (green) or negative (red) through tool calls
+- **Problem solved**: Provides instant visual understanding of event sentiment, helping users quickly grasp the nature of news without reading details
+- Color-coded visualization enables pattern recognition (e.g., COVID-19 impact visible through red pin concentration)
+- Agent's analysis and categorization tools enhance information comprehension
+
+### 02:59–03:28 — Random Event Discovery (Dice Feature)
+
+**Key Points:**
+
+- **End-to-end agent behavior**: Dice click → Agent plans random event selection → Executes search across historical database → Retrieves event → Geocodes location → Displays on map
+- **Problem solved**: Breaks echo chamber effect by exposing users to events outside their familiar time periods and cultural contexts
+- Agent's planning capabilities enable intelligent random selection that maintains educational value
+- Promotes serendipitous learning and global historical awareness
+
+### 03:28–04:16 — Multilingual Support
+
+**Key Points:**
+
+- **End-to-end agent behavior**: Chinese query "What happened recently in Hong Kong?" → Agent plans multilingual search → Executes web search → Generates Chinese article → Reports in Chinese → Maintains conversation context in Chinese
+- **Agentic steps**: Agent adapts tool calls and responses based on language preference, demonstrating context-aware planning and execution
+- **Problem solved**: Removes language barriers, enabling global users to explore news and history in their native language
+- Agent's memory system maintains language context throughout the conversation
+- Localized content generation ensures culturally appropriate information delivery
+
+### 04:16–04:43 — Conclusion & Vision
+
+**Key Points:**
+
+- **Agent architecture summary**: Robust Planner-Executor-Memory pattern combines real-time knowledge (web search) with intelligent planning and memory management to "engineer truth"
+- **Problem solved**: Transforms passive information consumption into active, interactive understanding through agent-driven exploration
+- Core philosophy: Agent architecture turns raw information into contextual understanding by combining planning, tool execution, and memory
+- Vision: Interactive, intelligent news consumption powered by agentic AI that maintains context, learns from interactions, and provides personalized experiences
 
 ## Key Highlights Emphasized
 
-1. **Agent Architecture**: The Planner-Executor-Memory pattern enables structured, reliable task execution
-2. **Web Search Integration**: Gemini API uses Google Search to find real, current events
-3. **Intelligent Caching**: Memory system reduces API calls and improves response times
-4. **Streaming Responses**: Real-time explanation streaming for better UX
-5. **Robust Error Handling**: System handles API failures, invalid data, and edge cases gracefully
-6. **Multi-language Support**: Full internationalization for global users
+1. **Spatial Organization**: Geographic anchoring transforms abstract headlines into personal journeys
+2. **AI Reporter**: Conversational interface with Gemini Live API for natural news interaction
+3. **Real-time Web Search**: Dynamic article generation with current, accurate information
+4. **Intelligent Caching**: Memory system stores conversations and results for efficiency
+5. **Visual Sentiment Analysis**: Color-coded pins (green/red) provide instant event understanding
+6. **Random Discovery**: Dice feature encourages serendipitous learning beyond familiar timeframes
+7. **Multilingual Support**: Native language support for global accessibility
+8. **Agent Architecture**: Robust Planner-Executor-Memory pattern handles complex workflows
+9. **Voice Commands**: Hands-free exploration through natural language interaction
+10. **Truth Engineering**: Combining AI architecture with real-time knowledge to turn information into understanding

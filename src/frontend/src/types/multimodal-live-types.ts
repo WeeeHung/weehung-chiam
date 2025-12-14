@@ -149,7 +149,7 @@ export type StreamingLog = {
 
 // Type-Guards
 
-const prop = (a: any, prop: string, kind: string = "object") =>
+const prop = (a: any, prop: string) =>
   typeof a === "object" && typeof a[prop] === "object";
 
 // outgoing messages

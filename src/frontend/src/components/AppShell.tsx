@@ -2,7 +2,7 @@
  * App shell component - top bar with navigation, title, language, and date picker.
  */
 
-import { Group, Title, ActionIcon } from "@mantine/core";
+import { Group, Title } from "@mantine/core";
 import { DatePicker } from "./DatePicker";
 import { LanguagePicker } from "./LanguagePicker";
 import { MapStylePicker, MapStyle } from "./MapStylePicker";

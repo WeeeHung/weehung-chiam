@@ -29,14 +29,6 @@ export function DatePicker({ startDate, endDate, onChange }: DatePickerProps) {
     }
   };
 
-  // Format display text
-  const formatDateRange = () => {
-    if (!startDate || !endDate) return "Select date range";
-    if (startDate === endDate) {
-      return dayjs(startDate).format("MMM D, YYYY");
-    }
-    return `${dayjs(startDate).format("MMM D")} - ${dayjs(endDate).format("MMM D, YYYY")}`;
-  };
 
   return (
     <Group gap="xs" align="center">

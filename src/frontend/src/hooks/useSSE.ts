@@ -63,7 +63,7 @@ export function useSSE(url: string, options: UseSSEOptions = {}) {
       eventSource.close();
     });
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       setIsStreaming(false);
       onErrorRef.current?.(new Error("SSE connection error"));
       eventSource.close();

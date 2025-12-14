@@ -14,11 +14,16 @@ interface EventDialogProps {
   pin: Pin | null;
   language: string;
   onClose: () => void;
+  onStateChange?: (state: {
+    connectionStatus: "idle" | "connecting" | "connected" | "error";
+    isPlaying: boolean;
+    isExplaining?: boolean;
+  }) => void;
 }
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
-export function EventDialog({ pin, language, onClose }: EventDialogProps) {
+export function EventDialog({ pin, language, onClose, onStateChange }: EventDialogProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
   const hasSentInitialIntroRef = useRef(false);
   const shouldAutoStartRef = useRef(false);
@@ -92,6 +97,9 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     },
   });
 
+  // Determine if playing based on isModelTurn (must be declared right after hook)
+  const isPlaying = isModelTurn;
+
   // Update config when explanation or pin changes
   useEffect(() => {
     if (pin) {
@@ -139,7 +147,7 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     }
   }, [pin?.event_id, explanationUrl]);
 
-  // Sync connection status with hook
+  // Sync connection status with hook and notify parent
   useEffect(() => {
     if (connected) {
       setConnectionStatus("connected");
@@ -149,6 +157,17 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
       setConnectionStatus("idle");
     }
   }, [connected, connectionStatus]);
+
+  // Notify parent of state changes
+  useEffect(() => {
+    if (onStateChange) {
+      onStateChange({
+        connectionStatus,
+        isPlaying,
+        isExplaining,
+      });
+    }
+  }, [connectionStatus, isPlaying, isExplaining, onStateChange]);
 
 
   // Set up audio recorder to send data when connected and setup is complete
@@ -281,11 +300,9 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     }
   };
 
-  // Determine if playing based on isModelTurn
-  const isPlaying = isModelTurn;
-
   const get_number_from_event_id = (event_id: string) => {
-    return parseInt(event_id.split("_")[3]);
+    const parts = event_id.split("_");
+    return parseInt(parts[parts.length - 1]);
   }
 
   if (!pin) return null;
@@ -318,19 +335,6 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Atlantis Bar */}
-      <div className={`atlantis-bar ${isPlaying ? 'glowing' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <div 
-          className="atlantis-button"
-          style={{ cursor: 'default', pointerEvents: 'none', textAlign: 'center' }}
-        >
-          {connectionStatus === "idle" && (isExplaining ? "Loading article..." : "Atlantis")}
-          {connectionStatus === "connecting" && "Connecting..."}
-          {connectionStatus === "connected" && (isPlaying ? "Atlantis is speaking..." : "Atlantis is listening...")}
-          {connectionStatus === "error" && "Connection Error"}
         </div>
       </div>
     </div>

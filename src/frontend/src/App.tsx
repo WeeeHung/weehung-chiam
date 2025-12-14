@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "./components/AppShell";
 import { WorldMap } from "./components/WorldMap";
 import { EventDialog } from "./components/EventDialog";
+import { AtlantisBar } from "./components/AtlantisBar";
 import { usePins } from "./hooks/useEvents";
 import { useLoadingMessage } from "./hooks/useLoadingMessage";
 import { Pin, Viewport } from "./types/events";
@@ -67,12 +68,17 @@ function AppContent() {
   const [relatedPinIds, setRelatedPinIds] = useState<string[]>([]);
   const [locationInitialized, setLocationInitialized] = useState(false);
   const [canFetchEvents, setCanFetchEvents] = useState(false);
+  const [eventDialogState, setEventDialogState] = useState<{
+    connectionStatus: "idle" | "connecting" | "connected" | "error";
+    isPlaying: boolean;
+    isExplaining?: boolean;
+  } | null>(null);
 
   // Wait 2 seconds before allowing event fetching (to allow map animation to complete)
   useEffect(() => {
     const timer = setTimeout(() => {
       setCanFetchEvents(true);
-    }, 3500);
+    }, 4500);
 
     return () => clearTimeout(timer);
   }, []);
@@ -121,7 +127,7 @@ function AppContent() {
 
   // Fetch pins (viewport is already debounced in WorldMap component)
   // Wait for initial delay to complete before fetching
-  const { data: pinsData, isLoading: isLoadingPins } = usePins(
+  const { data: pinsData, isLoading: isLoadingPins, manualRefetch } = usePins(
     date,
     viewport,
     language,
@@ -162,6 +168,40 @@ function AppContent() {
       setRelatedPinIds([]);
     }
   }, []);
+
+  // Handle navigation to location (from voice commands)
+  const handleNavigateToLocation = useCallback((newViewport: Viewport) => {
+    setViewport(newViewport);
+    // Trigger pins fetch with new viewport
+    if (manualRefetch) {
+      manualRefetch(newViewport, undefined, undefined);
+    }
+  }, [manualRefetch]);
+
+  // Handle manual fetch button click
+  const handleManualFetch = useCallback(() => {
+    if (manualRefetch) {
+      manualRefetch(undefined, undefined, undefined);
+    }
+  }, [manualRefetch]);
+
+  // Handle language change from voice command
+  const handleLanguageChangeFromVoice = useCallback((newLanguage: string) => {
+    setLanguage(newLanguage);
+    // Trigger pins fetch with new language
+    if (manualRefetch) {
+      manualRefetch(undefined, undefined, newLanguage);
+    }
+  }, [manualRefetch]);
+
+  // Handle date change from voice command
+  const handleDateChangeFromVoice = useCallback((newDate: string) => {
+    setDate(newDate);
+    // Trigger pins fetch with new date
+    if (manualRefetch) {
+      manualRefetch(undefined, newDate, undefined);
+    }
+  }, [manualRefetch]);
 
   // Mapbox token from environment
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN;
@@ -215,9 +255,22 @@ function AppContent() {
           onClose={() => {
             setSelectedPin(null);
             setRelatedPinIds([]);
+            setEventDialogState(null);
           }}
+          onStateChange={setEventDialogState}
         />
       )}
+      
+      {/* Atlantis Bar - always visible */}
+      <AtlantisBar
+        isInDialog={!!selectedPin}
+        dialogState={eventDialogState || undefined}
+        onNavigateToLocation={handleNavigateToLocation}
+        onLanguageChange={handleLanguageChangeFromVoice}
+        onDateChange={handleDateChangeFromVoice}
+        onManualFetch={handleManualFetch}
+        currentLanguage={language}
+      />
     </div>
   );
 }

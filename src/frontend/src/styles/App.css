@@ -485,7 +485,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  z-index: 1001;
+  z-index: 2100; /* Above event-dialog-overlay (2000) */
   padding: 12px 24px;
   display: flex;
   justify-content: center;

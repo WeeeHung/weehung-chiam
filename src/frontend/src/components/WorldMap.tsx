@@ -35,7 +35,6 @@ export function WorldMap({
   const map = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
   const [isInitialized, setIsInitialized] = useState(false);
-  const isProgrammaticMoveRef = useRef(false);
   const lastViewportRef = useRef<Viewport | null>(null);
 
   // Initialize map
@@ -82,70 +81,10 @@ export function WorldMap({
       }
     });
 
-    // Handle viewport changes with debouncing
-    const moveTimeoutRef = { current: null as ReturnType<typeof setTimeout> | null };
-    const lastReportedViewportRef = { current: null as Viewport | null };
-    const handleMove = () => {
-      if (!map.current || isProgrammaticMoveRef.current) {
-        isProgrammaticMoveRef.current = false;
-        return;
-      }
-
-      if (moveTimeoutRef.current) {
-        clearTimeout(moveTimeoutRef.current);
-      }
-
-      moveTimeoutRef.current = setTimeout(() => {
-        if (!map.current) return;
-        const bounds = map.current.getBounds();
-        const newViewport: Viewport = {
-          bbox: {
-            west: bounds.getWest(),
-            south: bounds.getSouth(),
-            east: bounds.getEast(),
-            north: bounds.getNorth(),
-          },
-          zoom: map.current.getZoom(),
-        };
-        
-        // Only update if viewport changed significantly (prevent micro-movements)
-        const last = lastReportedViewportRef.current;
-        if (last) {
-          const lastCenter = [
-            (last.bbox.west + last.bbox.east) / 2,
-            (last.bbox.south + last.bbox.north) / 2,
-          ];
-          const newCenter = [
-            (newViewport.bbox.west + newViewport.bbox.east) / 2,
-            (newViewport.bbox.south + newViewport.bbox.north) / 2,
-          ];
-          
-          const centerChanged =
-            Math.abs(lastCenter[0] - newCenter[0]) > 0.01 ||
-            Math.abs(lastCenter[1] - newCenter[1]) > 0.01;
-          const zoomChanged = Math.abs(last.zoom - newViewport.zoom) > 0.1;
-          
-          // Only report if change is significant
-          if (!centerChanged && !zoomChanged) {
-            return;
-          }
-        }
-        
-        lastReportedViewportRef.current = newViewport;
-        onViewportChange(newViewport);
-      }, 500);
-    };
-
-    map.current.on("moveend", handleMove);
-    map.current.on("zoomend", handleMove);
-    
     // Store initial viewport
     lastViewportRef.current = viewport;
 
     return () => {
-      if (moveTimeoutRef.current) {
-        clearTimeout(moveTimeoutRef.current);
-      }
       if (map.current) {
         map.current.remove();
         map.current = null;
@@ -229,11 +168,10 @@ export function WorldMap({
         prevViewport: prev,
       });
 
-      isProgrammaticMoveRef.current = true;
       map.current.flyTo({
         center: targetCenter as [number, number],
         zoom: viewport.zoom,
-        duration: 1500, // 2 second smooth animation
+        duration: 3000, // 3 second smooth animation
         essential: true,
       });
     }

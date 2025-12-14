@@ -142,18 +142,26 @@ export function usePins(
   // Track the stabilized viewport that's used for the query key
   // This only updates when the viewport changes by more than 80%
   const [stabilizedViewport, setStabilizedViewport] = useState<PinsRequest["viewport"] | null>(null);
+  
+  // Track frozen date/language that only update on manual triggers (not on prop changes)
+  const [frozenDate, setFrozenDate] = useState<string>(date);
+  const [frozenLanguage, setFrozenLanguage] = useState<string>(language);
+  
+  // Track if initial load fetch has completed
+  const hasInitialFetchRef = useRef(false);
 
-  // Reset stabilized viewport when date or language changes (fresh start)
-  useEffect(() => {
-    setStabilizedViewport(null);
-  }, [date, language]);
+  // NO LONGER reset stabilized viewport on date/language changes
+  // Only fetch once after initial viewport stabilization, then only on manual triggers
 
   // Update stabilized viewport when current viewport changes by more than threshold
   // Add debounce to prevent rapid successive updates from causing duplicate queries
   useEffect(() => {
     if (!stabilizedViewport) {
-      // Initial load: set stabilized viewport immediately
-      setStabilizedViewport({ ...viewport });
+      // Initial load: set stabilized viewport immediately (only once)
+      if (!hasInitialFetchRef.current) {
+        setStabilizedViewport({ ...viewport });
+        hasInitialFetchRef.current = true;
+      }
       return;
     }
 
@@ -192,18 +200,19 @@ export function usePins(
     return normalizeViewport(vp);
   }, [stabilizedViewport, viewport, normalizeViewport]);
   
-  // Build query key
+  // Build query key using frozen date/language (not current props)
+  // This prevents automatic refetches when date/language props change
   const queryKey = useMemo(() => [
     "pins",
-    date,
+    frozenDate,
     normalizedViewport.bbox.west,
     normalizedViewport.bbox.south,
     normalizedViewport.bbox.east,
     normalizedViewport.bbox.north,
     normalizedViewport.zoom,
-    language,
+    frozenLanguage,
     maxPins,
-  ], [date, normalizedViewport, language, maxPins]);
+  ], [frozenDate, normalizedViewport, frozenLanguage, maxPins]);
 
   // Track query key changes with detailed breakdown
   const prevQueryKeyRef = useRef<string | null>(null);
@@ -272,22 +281,54 @@ export function usePins(
   }, [isQueryEnabled, enabled, date, viewport, stabilizedViewport]);
   
   // Use normalized viewport in query key - this only changes when viewport changes > 80%
-  return useQuery<PinsResponse, Error>({
+  // Note: queryFn uses values from queryKey via closure, but we explicitly use frozen values
+  const query = useQuery<PinsResponse, Error>({
     queryKey,
-    queryFn: () => {
+    queryFn: async () => {
       console.log(`[usePins] 📞 useQuery.queryFn called (React Query is fetching)`, {
         queryKey,
         timestamp: new Date().toISOString(),
       });
+      // Use the current stabilized viewport (or viewport as fallback) for the request
+      const viewportToUse = stabilizedViewport || viewport;
       return fetchPins({
-        date,
-        viewport, // Still use current viewport for the actual request
-        language,
+        date: frozenDate, // Use frozen date from queryKey
+        viewport: viewportToUse,
+        language: frozenLanguage, // Use frozen language from queryKey
         max_pins: maxPins,
       });
     },
     enabled: isQueryEnabled,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
+
+  // Expose manual trigger function for button/voice commands
+  return {
+    ...query,
+    manualRefetch: async (newViewport?: PinsRequest["viewport"], newDate?: string, newLanguage?: string) => {
+      // Update frozen values if provided, otherwise use current props
+      if (newDate !== undefined) {
+        setFrozenDate(newDate);
+      } else if (date !== frozenDate) {
+        // Update to current if it changed
+        setFrozenDate(date);
+      }
+      
+      if (newLanguage !== undefined) {
+        setFrozenLanguage(newLanguage);
+      } else if (language !== frozenLanguage) {
+        // Update to current if it changed
+        setFrozenLanguage(language);
+      }
+      
+      // If new viewport provided, update stabilized viewport to trigger new query
+      if (newViewport) {
+        setStabilizedViewport({ ...newViewport });
+      } else {
+        // Otherwise, just refetch with current params
+        return query.refetch();
+      }
+    },
+  };
 }
 

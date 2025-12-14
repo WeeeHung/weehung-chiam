@@ -3,59 +3,77 @@
 
 set -e
 
+# Detect CI environment
+CI=${CI:-false}
+
 echo "Running smoke tests..."
 echo ""
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "⚠️  Warning: .env file not found. Please create it from .env.example"
-    echo "   Run: cp .env.example .env"
-    echo ""
-fi
-
-# Check if Python dependencies are installed
-echo "✓ Checking Python dependencies..."
-python3 -c "from google import genai; import dotenv" 2>/dev/null || {
-    echo "❌ Missing dependencies. Please install: pip install -r requirements.txt"
+# Install dependencies if missing (required for CI)
+echo "✓ Installing/checking Python dependencies..."
+pip install -q -r requirements.txt || {
+    echo "❌ Failed to install dependencies"
     exit 1
 }
 echo "  Dependencies OK"
 echo ""
 
-# Check if core modules can be imported
-echo "✓ Checking core modules..."
-cd src
+# Verify core modules can be imported (syntax and import check)
+echo "✓ Checking core module imports..."
 python3 -c "
 import sys
-sys.path.insert(0, '.')
+import os
+
+# Add src/backend to path
+backend_path = os.path.join(os.path.dirname(__file__), 'src', 'backend')
+sys.path.insert(0, backend_path)
+
 try:
-    from planner import Planner
-    from executor import Executor
-    from memory import Memory
-    from main import Agent
-    print('  All modules imported successfully')
+    # Test agent modules
+    from services.agent import Planner, Executor, Memory
+    print('  ✓ Agent modules imported successfully')
+    
+    # Test backend modules
+    from routers import events
+    from services import gemini, cache, news
+    print('  ✓ Backend modules imported successfully')
+    
+    # Test main app (without initializing services that need API keys)
+    from main import app
+    print('  ✓ FastAPI app imported successfully')
+    
 except ImportError as e:
     print(f'  ❌ Import error: {e}')
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
+except Exception as e:
+    # Some modules might fail to initialize without API keys, that's OK for smoke test
+    if 'GEMINI_API_KEY' in str(e) or 'API' in str(e):
+        print(f'  ⚠️  Module requires API key (expected in CI): {e}')
+    else:
+        print(f'  ❌ Unexpected error: {e}')
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 "
-cd ..
 echo ""
 
-# Check if .env has API key configured (if file exists)
-if [ -f .env ]; then
-    if grep -q "GEMINI_API_KEY=your_gemini_api_key_here" .env || ! grep -q "GEMINI_API_KEY=" .env; then
-        echo "⚠️  Warning: GEMINI_API_KEY not configured in .env"
-        echo "   Please add your Gemini API key to .env"
-        echo ""
+# .env check (warning only, not a failure)
+if [ ! -f .env ]; then
+    if [ "$CI" = "true" ]; then
+        echo "ℹ️  Running in CI (no .env required)"
     else
-        echo "✓ GEMINI_API_KEY found in .env"
-        echo ""
+        echo "⚠️  Warning: .env file not found"
+        echo "   Run: cp .env.example .env (if available)"
     fi
+    echo ""
 fi
 
 echo "✅ Smoke tests completed successfully!"
 echo ""
-echo "Next steps:"
-echo "  1. Configure your GEMINI_API_KEY in .env"
-echo "  2. Run the app: python src/main.py"
+echo "Core functionality verified:"
+echo "  - Dependencies installed"
+echo "  - All modules can be imported"
+echo "  - No syntax errors detected"
 

@@ -6,9 +6,9 @@
 import { useState, useEffect, useRef } from "react";
 
 const LOADING_MESSAGES = [
-    "loading local news reporter...",
-    "loading events...",
-    "loading historian..."
+    "Loading Atlantis Reporter...",
+    "Loading Events...",
+    "Loading Historian..."
 ];
 
 interface UseLoadingMessageOptions {
@@ -22,7 +22,7 @@ interface UseLoadingMessageOptions {
 export function useLoadingMessage(options: UseLoadingMessageOptions = {}) {
   const {
     enabled = true,
-    typeSpeed = 200,
+    typeSpeed = 100,
     deleteSpeed = 50,
     pauseAfterComplete = 1000,
     pauseAfterDelete = 300,

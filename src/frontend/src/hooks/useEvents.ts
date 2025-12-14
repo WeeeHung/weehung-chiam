@@ -3,38 +3,77 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { PinsRequest, PinsResponse } from "../types/events";
 
 const API_BASE = "/api";
 
-// Distance threshold in kilometers (50km)
-const REFETCH_DISTANCE_KM = 50;
+// Viewport change threshold (80%)
+const REFETCH_THRESHOLD_PERCENT = 80;
 
 /**
- * Calculate the distance between two lat/lng points using the Haversine formula.
- * Returns distance in kilometers.
+ * Calculate viewport dimensions and center from bbox.
  */
-function calculateDistance(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number
-): number {
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+function getViewportMetrics(viewport: { bbox: { west: number; south: number; east: number; north: number } }) {
+  const width = viewport.bbox.east - viewport.bbox.west;
+  const height = viewport.bbox.north - viewport.bbox.south;
+  const centerX = (viewport.bbox.west + viewport.bbox.east) / 2;
+  const centerY = (viewport.bbox.south + viewport.bbox.north) / 2;
+  return { width, height, centerX, centerY };
+}
+
+/**
+ * Check if viewport has changed by more than the threshold (80%).
+ * Returns true if refetch is needed.
+ */
+function shouldRefetch(
+  oldViewport: { bbox: { west: number; south: number; east: number; north: number } },
+  newViewport: { bbox: { west: number; south: number; east: number; north: number } }
+): boolean {
+  const oldMetrics = getViewportMetrics(oldViewport);
+  const newMetrics = getViewportMetrics(newViewport);
+
+  // Calculate percentage difference in x position
+  const xDiffPercent = Math.abs(newMetrics.centerX - oldMetrics.centerX) / oldMetrics.width * 100;
+  
+  // Calculate percentage difference in y position
+  const yDiffPercent = Math.abs(newMetrics.centerY - oldMetrics.centerY) / oldMetrics.height * 100;
+  
+  // Calculate percentage difference in width (for zoom out)
+  const widthDiffPercent = Math.abs(newMetrics.width - oldMetrics.width) / oldMetrics.width * 100;
+  
+  // Calculate percentage difference in height (for zoom out)
+  const heightDiffPercent = Math.abs(newMetrics.height - oldMetrics.height) / oldMetrics.height * 100;
+
+  // Refetch if any change exceeds the threshold
+  return (
+    xDiffPercent > REFETCH_THRESHOLD_PERCENT ||
+    yDiffPercent > REFETCH_THRESHOLD_PERCENT ||
+    widthDiffPercent > REFETCH_THRESHOLD_PERCENT ||
+    heightDiffPercent > REFETCH_THRESHOLD_PERCENT
+  );
 }
 
 async function fetchPins(request: PinsRequest): Promise<PinsResponse> {
+  const timestamp = new Date().toISOString();
+  const callId = Math.random().toString(36).substring(7);
+  
+  console.log(`[fetchPins] 🚀 API call initiated`, {
+    callId,
+    timestamp,
+    endpoint: `${API_BASE}/events/pins`,
+    request: {
+      date: request.date,
+      language: request.language,
+      max_pins: request.max_pins,
+      viewport: {
+        bbox: request.viewport.bbox,
+        zoom: request.viewport.zoom,
+      },
+    },
+    stackTrace: new Error().stack?.split('\n').slice(2, 6).join('\n'), // Show caller stack
+  });
+
   const response = await fetch(`${API_BASE}/events/pins`, {
     method: "POST",
     headers: {
@@ -44,91 +83,210 @@ async function fetchPins(request: PinsRequest): Promise<PinsResponse> {
   });
 
   if (!response.ok) {
+    console.error(`[fetchPins] ❌ API call failed`, {
+      callId,
+      status: response.status,
+      statusText: response.statusText,
+    });
     throw new Error(`Failed to fetch pins: ${response.statusText}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log(`[fetchPins] ✅ API call completed`, {
+    callId,
+    timestamp: new Date().toISOString(),
+    pinsCount: data.pins?.length || 0,
+  });
+
+  return data;
 }
 
 export function usePins(
   date: string,
   viewport: PinsRequest["viewport"],
   language: string = "en",
-  maxPins: number = 8,
+  maxPins: number = 10,
   enabled: boolean = true
 ) {
-  // Calculate current center from viewport
-  const currentCenter = useMemo(() => {
-    return {
-      lat: (viewport.bbox.south + viewport.bbox.north) / 2,
-      lng: (viewport.bbox.west + viewport.bbox.east) / 2,
-    };
-  }, [viewport]);
-
-  // Track the stabilized center that's used for the query key
-  // This only updates when the map center moves more than 50km
-  const [stabilizedCenter, setStabilizedCenter] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
-
-  // Reset stabilized center when date or language changes (fresh start)
+  // Log date value to verify it's stable (YYYY-MM-DD format, no time)
+  const prevDateRef_log = useRef<string | null>(null);
   useEffect(() => {
-    setStabilizedCenter(null);
+    if (prevDateRef_log.current !== date) {
+      console.log(`[usePins] 📅 Date value`, {
+        date,
+        dateLength: date.length,
+        dateType: typeof date,
+        previous: prevDateRef_log.current,
+        matchesYYYYMMDD: /^\d{4}-\d{2}-\d{2}$/.test(date),
+        includesTime: date.includes('T') || date.includes(' '),
+      });
+      prevDateRef_log.current = date;
+    }
+  }, [date]);
+
+  // Normalize viewport helper function - used for both comparison and query key
+  // Round bbox to 2 decimal places (~1km precision) to group similar viewports together
+  // This prevents duplicate queries when viewport changes slightly (e.g., from map animation)
+  const normalizeViewport = useCallback((vp: PinsRequest["viewport"]) => {
+    return {
+      bbox: {
+        west: Math.round(vp.bbox.west * 100) / 100,
+        south: Math.round(vp.bbox.south * 100) / 100,
+        east: Math.round(vp.bbox.east * 100) / 100,
+        north: Math.round(vp.bbox.north * 100) / 100,
+      },
+      zoom: Math.round(vp.zoom * 10) / 10,
+    };
+  }, []);
+
+  // Track the stabilized viewport that's used for the query key
+  // This only updates when the viewport changes by more than 80%
+  const [stabilizedViewport, setStabilizedViewport] = useState<PinsRequest["viewport"] | null>(null);
+
+  // Reset stabilized viewport when date or language changes (fresh start)
+  useEffect(() => {
+    setStabilizedViewport(null);
   }, [date, language]);
 
-  // Update stabilized center when current center moves more than threshold
+  // Update stabilized viewport when current viewport changes by more than threshold
+  // Add debounce to prevent rapid successive updates from causing duplicate queries
   useEffect(() => {
-    if (!stabilizedCenter) {
-      // Initial load: set stabilized center immediately
-      setStabilizedCenter({ ...currentCenter });
+    if (!stabilizedViewport) {
+      // Initial load: set stabilized viewport immediately
+      setStabilizedViewport({ ...viewport });
       return;
     }
 
-    // Calculate distance from last stabilized center
-    const distance = calculateDistance(
-      stabilizedCenter.lat,
-      stabilizedCenter.lng,
-      currentCenter.lat,
-      currentCenter.lng
-    );
-
-    // Only update stabilized center (which triggers refetch) if moved more than threshold
-    if (distance > REFETCH_DISTANCE_KM) {
-      setStabilizedCenter({ ...currentCenter });
+    // Normalize both viewports before comparison to ignore small differences
+    // This prevents duplicate queries when map reports slightly different bounds after animation
+    const normalizedStabilized = normalizeViewport(stabilizedViewport);
+    const normalizedCurrent = normalizeViewport(viewport);
+    
+    // If normalized viewports are the same, ignore the change (it's just rounding differences)
+    if (
+      normalizedStabilized.bbox.west === normalizedCurrent.bbox.west &&
+      normalizedStabilized.bbox.south === normalizedCurrent.bbox.south &&
+      normalizedStabilized.bbox.east === normalizedCurrent.bbox.east &&
+      normalizedStabilized.bbox.north === normalizedCurrent.bbox.north &&
+      normalizedStabilized.zoom === normalizedCurrent.zoom
+    ) {
+      // Normalized viewports are identical, ignore this change
+      return;
     }
-  }, [currentCenter.lat, currentCenter.lng, stabilizedCenter]);
 
-  // Normalize the stabilized center used in query key to prevent micro-changes
-  // Round to 3 decimal places (~100m precision)
-  const normalizedCenter = useMemo(() => {
-    const center = stabilizedCenter || currentCenter;
-    return {
-      lat: Math.round(center.lat * 1000) / 1000,
-      lng: Math.round(center.lng * 1000) / 1000,
-    };
-  }, [stabilizedCenter, currentCenter]);
+    // Check if viewport has changed by more than 80% (using normalized values for comparison)
+    if (shouldRefetch(normalizedStabilized, normalizedCurrent)) {
+      // Debounce the update to prevent rapid successive changes
+      // This prevents the case where viewport changes twice quickly (e.g., 
+      // from programmatic update + map animation completion) causing duplicate queries
+      const timeoutId = setTimeout(() => {
+        setStabilizedViewport({ ...viewport });
+      }, 300); // 300ms debounce
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [viewport, stabilizedViewport, normalizeViewport]);
+
+  const normalizedViewport = useMemo(() => {
+    const vp = stabilizedViewport || viewport;
+    return normalizeViewport(vp);
+  }, [stabilizedViewport, viewport, normalizeViewport]);
   
-  // Flatten bbox into query key for stable comparison
-  // Use normalizedCenter in query key - this only changes when center moves > 50km
+  // Build query key
+  const queryKey = useMemo(() => [
+    "pins",
+    date,
+    normalizedViewport.bbox.west,
+    normalizedViewport.bbox.south,
+    normalizedViewport.bbox.east,
+    normalizedViewport.bbox.north,
+    normalizedViewport.zoom,
+    language,
+    maxPins,
+  ], [date, normalizedViewport, language, maxPins]);
+
+  // Track query key changes with detailed breakdown
+  const prevQueryKeyRef = useRef<string | null>(null);
+  const prevDateRef = useRef<string | null>(null);
+  const prevNormalizedViewportRef = useRef<string | null>(null);
+  
+  useEffect(() => {
+    const queryKeyStr = JSON.stringify(queryKey);
+    const dateStr = date;
+    const normalizedViewportStr = JSON.stringify(normalizedViewport);
+    
+    // Track individual component changes
+    const changes: string[] = [];
+    if (prevDateRef.current !== null && prevDateRef.current !== dateStr) {
+      changes.push(`date: "${prevDateRef.current}" → "${dateStr}"`);
+    }
+    if (prevNormalizedViewportRef.current !== null && prevNormalizedViewportRef.current !== normalizedViewportStr) {
+      changes.push(`normalizedViewport changed`);
+    }
+    
+    // Update refs
+    prevDateRef.current = dateStr;
+    prevNormalizedViewportRef.current = normalizedViewportStr;
+    
+    if (prevQueryKeyRef.current !== null && prevQueryKeyRef.current !== queryKeyStr) {
+      console.log(`[usePins] 🔑 Query key changed`, {
+        previous: prevQueryKeyRef.current,
+        current: queryKeyStr,
+        queryKey,
+        componentChanges: changes.length > 0 ? changes : ['unknown'],
+        breakdown: {
+          date: {
+            previous: prevDateRef.current === null ? null : prevDateRef.current,
+            current: dateStr,
+            changed: prevDateRef.current !== null && prevDateRef.current !== dateStr,
+          },
+          normalizedViewport: {
+            changed: prevNormalizedViewportRef.current !== null && prevNormalizedViewportRef.current !== normalizedViewportStr,
+            current: normalizedViewport,
+          },
+          language,
+          maxPins,
+        },
+      });
+    }
+    prevQueryKeyRef.current = queryKeyStr;
+  }, [queryKey, date, normalizedViewport, language, maxPins]);
+
+  // Track enabled state
+  const isQueryEnabled = enabled && !!date && !!viewport && !!stabilizedViewport;
+  const prevEnabledRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (prevEnabledRef.current !== isQueryEnabled) {
+      console.log(`[usePins] 🔄 Query enabled state changed`, {
+        previous: prevEnabledRef.current,
+        current: isQueryEnabled,
+        reasons: {
+          enabled,
+          hasDate: !!date,
+          hasViewport: !!viewport,
+          hasStabilizedViewport: !!stabilizedViewport,
+        },
+      });
+      prevEnabledRef.current = isQueryEnabled;
+    }
+  }, [isQueryEnabled, enabled, date, viewport, stabilizedViewport]);
+  
+  // Use normalized viewport in query key - this only changes when viewport changes > 80%
   return useQuery<PinsResponse, Error>({
-    queryKey: [
-      "pins",
-      date,
-      normalizedCenter.lat,
-      normalizedCenter.lng,
-      Math.round(viewport.zoom * 10) / 10, // Round zoom to 1 decimal place
-      language,
-      maxPins,
-    ],
-    queryFn: () =>
-      fetchPins({
+    queryKey,
+    queryFn: () => {
+      console.log(`[usePins] 📞 useQuery.queryFn called (React Query is fetching)`, {
+        queryKey,
+        timestamp: new Date().toISOString(),
+      });
+      return fetchPins({
         date,
         viewport, // Still use current viewport for the actual request
         language,
         max_pins: maxPins,
-      }),
-    enabled: enabled && !!date && !!viewport && !!stabilizedCenter,
+      });
+    },
+    enabled: isQueryEnabled,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 }

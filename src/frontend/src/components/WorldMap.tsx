@@ -3,12 +3,11 @@
  * Uses Mapbox GL JS for rendering.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { Pin, Viewport } from "../types/events";
 
 // Import mapbox-gl - Vite handles CommonJS modules
-// @ts-expect-error - mapbox-gl doesn't have proper ESM default export
 import mapboxgl from "mapbox-gl";
 
 interface WorldMapProps {
@@ -76,7 +75,7 @@ export function WorldMap({
     });
 
     // Handle viewport changes with debouncing
-    const moveTimeoutRef = { current: null as NodeJS.Timeout | null };
+    const moveTimeoutRef = { current: null as ReturnType<typeof setTimeout> | null };
     const lastReportedViewportRef = { current: null as Viewport | null };
     const handleMove = () => {
       if (!map.current || isProgrammaticMoveRef.current) {
@@ -169,7 +168,6 @@ export function WorldMap({
     }
 
     // Get current map state to compare with target viewport
-    const currentBounds = map.current.getBounds();
     const currentCenter = map.current.getCenter();
     const currentZoom = map.current.getZoom();
     
@@ -227,7 +225,7 @@ export function WorldMap({
       map.current.flyTo({
         center: targetCenter as [number, number],
         zoom: viewport.zoom,
-        duration: 2000, // 2 second smooth animation
+        duration: 1500, // 2 second smooth animation
         essential: true,
       });
     }
@@ -266,12 +264,13 @@ export function WorldMap({
         const wasSelected = markerEl.classList.contains("selected");
         const wasRelated = markerEl.classList.contains("related");
 
+        // All pins have the same design regardless of selection state
         if (wasSelected !== isSelected || wasRelated !== isRelated) {
-          markerEl.className = `map-marker ${isSelected ? "selected" : ""} ${isRelated ? "related" : ""}`;
-          // Update border on the circle element (first child div)
+          markerEl.className = "map-marker";
+          // Keep border consistent for all pins
           const circleEl = markerEl.querySelector("div:first-child") as HTMLElement;
           if (circleEl) {
-            circleEl.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
+            circleEl.style.border = "2px solid #fff";
           }
         }
 
@@ -281,7 +280,7 @@ export function WorldMap({
           indexEl.textContent = pinIndex.toString();
         }
 
-        // Update position if needed
+        // Only update position if coordinates actually changed
         const [currentLng, currentLat] = existingMarker.getLngLat().toArray();
         if (Math.abs(currentLng - pin.lng) > 0.0001 || Math.abs(currentLat - pin.lat) > 0.0001) {
           existingMarker.setLngLat([pin.lng, pin.lat]);
@@ -291,17 +290,34 @@ export function WorldMap({
         // Pin shape: circular top with pointed bottom
         // All pins are the same size (not based on significance)
         const size = 30; // Fixed size for all pins
-        const pinColor = getCategoryColor(pin.category);
+        const pinColor = getPositivityColor(pin.positivity_scale);
         
         const wrapper = document.createElement("div");
-        wrapper.className = `map-marker ${isSelected ? "selected" : ""} ${isRelated ? "related" : ""}`;
-        wrapper.style.position = "relative";
+        wrapper.className = "map-marker";
+        // Mapbox handles positioning via CSS transforms - don't interfere
+        // Set explicit dimensions that Mapbox will use for anchor calculation
         wrapper.style.width = `${size * 1.3}px`;
         wrapper.style.height = `${size * 1.6}px`;
-        wrapper.style.display = "flex";
-        wrapper.style.flexDirection = "column";
-        wrapper.style.alignItems = "center";
         wrapper.style.cursor = "pointer";
+        wrapper.style.pointerEvents = "auto";
+        // Ensure no positioning styles that could interfere with Mapbox transforms
+        wrapper.style.margin = "0";
+        wrapper.style.padding = "0";
+        wrapper.style.boxSizing = "content-box";
+        // Use relative positioning for tooltip, but ensure it doesn't affect Mapbox anchor calculation
+        wrapper.style.position = "relative";
+        wrapper.style.overflow = "visible";
+        // Ensure wrapper maintains exact dimensions - tooltip is absolutely positioned so it won't affect layout
+        wrapper.style.display = "block";
+        
+        // Create inner wrapper for visual transforms (hover/selected scaling)
+        const inner = document.createElement("div");
+        inner.className = "map-marker-inner";
+        inner.style.width = "100%";
+        inner.style.height = "100%";
+        inner.style.display = "flex";
+        inner.style.flexDirection = "column";
+        inner.style.alignItems = "center";
         
         // Create circular top part
         const circle = document.createElement("div");
@@ -309,9 +325,8 @@ export function WorldMap({
         circle.style.height = `${size}px`;
         circle.style.borderRadius = "50%";
         circle.style.backgroundColor = pinColor;
-        circle.style.border = isSelected ? "3px solid #000" : "2px solid #fff";
+        circle.style.border = "2px solid #fff";
         circle.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
-        circle.style.position = "relative";
         circle.style.display = "flex";
         circle.style.alignItems = "center";
         circle.style.justifyContent = "center";
@@ -340,9 +355,83 @@ export function WorldMap({
         indexEl.style.pointerEvents = "none";
         circle.appendChild(indexEl);
         
-        wrapper.appendChild(circle);
-        wrapper.appendChild(point);
-        wrapper.title = pin.title;
+        inner.appendChild(circle);
+        inner.appendChild(point);
+        wrapper.appendChild(inner);
+        
+        // Create tooltip element with glassy design
+        const tooltip = document.createElement("div");
+        tooltip.className = "pin-tooltip";
+        tooltip.style.position = "absolute";
+        tooltip.style.bottom = "100%";
+        tooltip.style.left = "50%";
+        tooltip.style.transform = "translateX(-50%)";
+        tooltip.style.marginBottom = "8px";
+        tooltip.style.padding = "10px 16px";
+        tooltip.style.width = "280px";
+        tooltip.style.backgroundColor = "rgba(255, 255, 255, 0.65)";
+        tooltip.style.backdropFilter = "blur(8px) saturate(180%)";
+        tooltip.style.setProperty("-webkit-backdrop-filter", "blur(8px) saturate(180%)");
+        tooltip.style.color = "#111827";
+        tooltip.style.borderRadius = "8px";
+        tooltip.style.fontSize = "13px";
+        tooltip.style.fontWeight = "500";
+        tooltip.style.whiteSpace = "normal";
+        tooltip.style.textAlign = "center";
+        tooltip.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+        tooltip.style.border = "1px solid rgba(255, 255, 255, 0.3)";
+        tooltip.style.opacity = "0";
+        tooltip.style.visibility = "hidden";
+        tooltip.style.transition = "opacity 0.2s, visibility 0.2s";
+        tooltip.style.pointerEvents = "none";
+        tooltip.style.zIndex = "1000";
+        tooltip.style.wordWrap = "break-word";
+        tooltip.style.boxSizing = "border-box";
+        
+        // Create tooltip arrow (pointing down) with glassy style
+        const tooltipArrow = document.createElement("div");
+        tooltipArrow.style.position = "absolute";
+        tooltipArrow.style.top = "100%";
+        tooltipArrow.style.left = "50%";
+        tooltipArrow.style.transform = "translateX(-50%)";
+        tooltipArrow.style.width = "0";
+        tooltipArrow.style.height = "0";
+        tooltipArrow.style.borderLeft = "8px solid transparent";
+        tooltipArrow.style.borderRight = "8px solid transparent";
+        tooltipArrow.style.borderTop = "8px solid rgba(255, 255, 255, 0.85)";
+        tooltipArrow.style.filter = "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1))";
+        
+        // Create tooltip content
+        const tooltipTitle = document.createElement("div");
+        tooltipTitle.textContent = pin.title;
+        tooltipTitle.style.marginBottom = "6px";
+        tooltipTitle.style.fontWeight = "600";
+        tooltipTitle.style.fontSize = "15px";
+        tooltipTitle.style.lineHeight = "1.4";
+        tooltipTitle.style.color = "#111827";
+        
+        const tooltipReadMore = document.createElement("div");
+        tooltipReadMore.textContent = "Read the full story...";
+        tooltipReadMore.style.fontSize = "11px";
+        tooltipReadMore.style.opacity = "0.7";
+        tooltipReadMore.style.fontStyle = "italic";
+        tooltipReadMore.style.color = "#374151";
+        
+        tooltip.appendChild(tooltipTitle);
+        tooltip.appendChild(tooltipReadMore);
+        tooltip.appendChild(tooltipArrow);
+        wrapper.appendChild(tooltip);
+        
+        // Add hover event listeners
+        wrapper.addEventListener("mouseenter", () => {
+          tooltip.style.opacity = "1";
+          tooltip.style.visibility = "visible";
+        });
+        
+        wrapper.addEventListener("mouseleave", () => {
+          tooltip.style.opacity = "0";
+          tooltip.style.visibility = "hidden";
+        });
         
         const el = wrapper;
 
@@ -363,19 +452,38 @@ export function WorldMap({
     });
   }, [pins, isInitialized, selectedPinId, relatedPinIds, onPinClick]);
 
+
   return (
     <div ref={mapContainer} className="world-map" style={{ width: "100%", height: "100%" }} />
   );
 }
 
-function getCategoryColor(category: string): string {
-  const colors: Record<string, string> = {
-    politics: "#3b82f6",
-    conflict: "#ef4444",
-    culture: "#8b5cf6",
-    science: "#10b981",
-    economics: "#f59e0b",
-    other: "#6b7280",
-  };
-  return colors[category] || colors.other;
+/**
+ * Get color based on positivity scale (0-1).
+ * 1.0 (positive) = green, 0.0 (negative) = red, 0.5 (neutral) = yellow/orange
+ */
+function getPositivityColor(positivityScale: number): string {
+  // Clamp value between 0 and 1
+  const scale = Math.max(0, Math.min(1, positivityScale));
+  
+  // Interpolate between red (0) and green (1)
+  // Red: rgb(239, 68, 68) = #ef4444
+  // Green: rgb(34, 197, 94) = #22c55e
+  // Yellow (neutral 0.5): rgb(234, 179, 8) = #eab308
+  
+  if (scale <= 0.5) {
+    // Interpolate from red to yellow (0 to 0.5)
+    const t = scale * 2; // 0 to 1 for the red-yellow range
+    const r = Math.round(239 + (234 - 239) * t);
+    const g = Math.round(68 + (179 - 68) * t);
+    const b = Math.round(68 + (8 - 68) * t);
+    return `rgb(${r}, ${g}, ${b})`;
+  } else {
+    // Interpolate from yellow to green (0.5 to 1.0)
+    const t = (scale - 0.5) * 2; // 0 to 1 for the yellow-green range
+    const r = Math.round(234 + (34 - 234) * t);
+    const g = Math.round(179 + (197 - 179) * t);
+    const b = Math.round(8 + (94 - 8) * t);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
 }

@@ -2,11 +2,13 @@
  * Event dialog component for displaying event details and Q&A.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
-import { Pin, ChatMessage } from "../types/events";
+import { Pin } from "../types/events";
 import { useSentenceStream } from "../hooks/useSentenceStream";
+import { useLiveAPI } from "../hooks/useLiveAPI";
+import { AudioRecorder } from "../lib/audio-recorder";
 
 interface EventDialogProps {
   pin: Pin | null;
@@ -14,9 +16,35 @@ interface EventDialogProps {
   onClose: () => void;
 }
 
+// Map language codes to supported API language codes
+function getLanguageCode(lang: string): string {
+  const languageMap: Record<string, string> = {
+    en: "en-US",
+    zh: "zh-CN", // Default to Simplified Chinese
+    "zh-cn": "zh-CN",
+    "zh-tw": "zh-TW",
+    "zh-hans": "zh-CN",
+    "zh-hant": "zh-TW",
+    es: "es-ES",
+    fr: "fr-FR",
+    de: "de-DE",
+    ja: "ja-JP",
+    ko: "ko-KR",
+    pt: "pt-BR",
+    it: "it-IT",
+    ru: "ru-RU",
+    ar: "ar-SA",
+    hi: "hi-IN",
+  };
+  return languageMap[lang.toLowerCase()] || "en-US";
+}
+
+type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
+
 export function EventDialog({ pin, language, onClose }: EventDialogProps) {
-  const [question, setQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
+  const hasSentInitialIntroRef = useRef(false);
+  const shouldAutoStartRef = useRef(false);
 
   // Stream explanation sentence by sentence
   const explanationUrl = pin
@@ -24,92 +52,258 @@ export function EventDialog({ pin, language, onClose }: EventDialogProps) {
     : "";
 
   const { displayedText: explanation, isStreaming: isExplaining } = useSentenceStream(
-    explanationUrl
+    explanationUrl,
+    {
+      onDone: () => {
+        // Auto-start Live API when article streaming completes
+        if (pin && shouldAutoStartRef.current) {
+          console.log("[AUTO-START] Article streaming completed, starting Live API...");
+          handleStartLiveAPI();
+        }
+      }
+    }
   );
 
-  // Reset when pin changes
+  // Get API key from environment
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+
+  // Build system instruction from event information
+  const systemInstruction = pin
+    ? `You are Atlantis, a news reporter AI assistant with access to web search, reporting on historical events to a single person.
+
+Event Information:
+- Title: ${pin.title}
+- Date: ${pin.date}
+- Location: ${pin.location_label}
+- Category: ${pin.category}
+- Significance Score: ${pin.significance_score}
+${explanation ? `- Event Report: ${explanation.substring(0, 500)}...` : ''}
+
+When you first start, introduce yourself as a news reporter and give a brief, engaging news-style report about this event. After that initial introduction, switch to answering questions in a conversational Q&A format.
+
+You have access to web search capabilities. Use web search to find current, accurate information about this event and related topics. Provide detailed, well-researched answers based on web search results when relevant.
+
+Respond in ${language}. Be conversational and helpful. Keep responses concise for voice output.`
+    : "You are a helpful assistant.";
+
+  // Initialize Live API hook
+  const {
+    client,
+    connected,
+    connect,
+    disconnect,
+    isModelTurn,
+    setConfig,
+  } = useLiveAPI({
+    url: undefined, // Use default URL
+    apiKey,
+    initialConfig: {
+      model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+      systemInstruction: {
+        parts: [{ text: systemInstruction }],
+      },
+      tools: [{ googleSearch: {} }],
+      generationConfig: {
+        responseModalities: "audio",
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: "Aoede" },
+          },
+        },
+      },
+    },
+  });
+
+  // Update config when explanation or pin changes
   useEffect(() => {
     if (pin) {
-      setChatHistory([]);
-      setQuestion("");
+      const newSystemInstruction = `You are Atlantis, a news reporter AI assistant with access to web search, reporting on historical events to a single person.
+
+Event Information:
+- Title: ${pin.title}
+- Date: ${pin.date}
+- Location: ${pin.location_label}
+- Category: ${pin.category}
+- Significance Score: ${pin.significance_score}
+${explanation ? `- Event Report: ${explanation.substring(0, 500)}...` : ''}
+
+When you first start, introduce yourself as a news reporter and give a brief, engaging news-style report about this event. After that initial introduction, switch to answering questions in a conversational Q&A format.
+
+You have access to web search capabilities. Use web search to find current, accurate information about this event and related topics. Provide detailed, well-researched answers based on web search results when relevant.
+
+Respond in ${language}. Be conversational and helpful. Keep responses concise for voice output.`;
+
+      setConfig({
+        model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+        systemInstruction: {
+          parts: [{ text: newSystemInstruction }],
+        },
+        tools: [{ googleSearch: {} }],
+        generationConfig: {
+          responseModalities: "audio",
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: "Aoede" },
+            },
+          },
+        },
+      });
     }
-  }, [pin?.event_id]);
+  }, [pin, explanation, language, setConfig]);
 
-  const handleSendQuestion = () => {
-    if (!pin || !question.trim()) return;
+  // Set up auto-start when pin changes and article starts loading
+  useEffect(() => {
+    if (pin && explanationUrl) {
+      shouldAutoStartRef.current = true;
+    } else {
+      shouldAutoStartRef.current = false;
+    }
+  }, [pin?.event_id, explanationUrl]);
 
-    const newHistory: ChatMessage[] = [
-      ...chatHistory,
-      { role: "user", content: question },
-    ];
-    setChatHistory(newHistory);
-    setQuestion("");
+  // Sync connection status with hook
+  useEffect(() => {
+    if (connected) {
+      setConnectionStatus("connected");
+    } else if (connectionStatus === "connecting") {
+      // Keep connecting state until we know for sure
+    } else {
+      setConnectionStatus("idle");
+    }
+  }, [connected, connectionStatus]);
 
-    // Stream chat response
-    const chatUrl = `/api/events/${pin.event_id}/chat/stream`;
-    const chatBody = {
-      language,
-      question,
-      history: chatHistory,
-    };
 
-    // Use fetch for POST SSE
-    fetch(chatUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(chatBody),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Chat request failed");
+  // Set up audio recorder to send data when connected and setup is complete
+  const audioRecorderRef = useRef<AudioRecorder | null>(null);
+  const setupCompleteRef = useRef(false);
+  const onDataHandlerRef = useRef<((base64: string) => void) | null>(null);
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let assistantResponse = "";
+  useEffect(() => {
+    if (!connected) {
+      // Stop recorder when disconnected
+      if (audioRecorderRef.current) {
+        if (onDataHandlerRef.current) {
+          audioRecorderRef.current.off("data", onDataHandlerRef.current);
+          onDataHandlerRef.current = null;
+        }
+        audioRecorderRef.current.stop();
+        audioRecorderRef.current = null;
+      }
+      setupCompleteRef.current = false;
+      return;
+    }
 
-        if (!reader) return;
+    // Wait for setupcomplete before starting audio recorder
+    const onSetupComplete = () => {
+      console.log("[LIVE API] Setup complete received");
+      setupCompleteRef.current = true;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      // Create and start audio recorder after setup is complete
+      if (!audioRecorderRef.current) {
+        audioRecorderRef.current = new AudioRecorder(16000);
+      }
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+      const audioRecorder = audioRecorderRef.current;
 
-          let eventData: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              // Collect data lines (SSE spec: multiple data lines are concatenated with newlines)
-              eventData.push(line.slice(6));
-            } else if (line.startsWith("event: done") || (line === "" && eventData.length > 0)) {
-              // End of event - concatenate all data lines with newlines
-              if (eventData.length > 0) {
-                assistantResponse += eventData.join("\n");
-                eventData = [];
-              }
-              if (line.startsWith("event: done")) {
-                break;
-              }
-            } else if (line === "") {
-              // Empty line after data lines - flush accumulated data
-              if (eventData.length > 0) {
-                assistantResponse += eventData.join("\n");
-                eventData = [];
-              }
-            }
+      const onData = (base64: string) => {
+        if (!connected || !setupCompleteRef.current) return;
+        try {
+          client.sendRealtimeInput([
+            {
+              mimeType: "audio/pcm;rate=16000",
+              data: base64,
+            },
+          ]);
+        } catch (error) {
+          if ((error as Error)?.message?.includes("WebSocket is not connected")) {
+            // Ignore - connection may have closed
+          } else {
+            console.error("Error sending audio data:", error);
           }
         }
+      };
 
-        setChatHistory([
-          ...newHistory,
-          { role: "assistant", content: assistantResponse },
-        ]);
-      })
-      .catch((error) => {
-        console.error("Chat error:", error);
+      onDataHandlerRef.current = onData;
+      audioRecorder.on("data", onData);
+      audioRecorder.start().catch((error) => {
+        console.error("Error starting audio recorder:", error);
       });
+
+      // Send initial intro message
+      if (!hasSentInitialIntroRef.current) {
+        hasSentInitialIntroRef.current = true;
+        console.log("[LIVE API] Sending initial reporter introduction request...");
+        try {
+          client.send([
+            {
+              text: "Please introduce yourself as a news reporter and give me a brief, engaging news-style report about this event.",
+            },
+          ]);
+          console.log("[LIVE API] Initial introduction request sent");
+        } catch (error) {
+          console.error("[LIVE API] Error sending initial introduction:", error);
+        }
+      }
+    };
+
+    client.on("setupcomplete", onSetupComplete);
+
+    return () => {
+      if (audioRecorderRef.current && onDataHandlerRef.current) {
+        audioRecorderRef.current.off("data", onDataHandlerRef.current);
+        audioRecorderRef.current.stop();
+        onDataHandlerRef.current = null;
+      }
+      client.off("setupcomplete", onSetupComplete);
+    };
+  }, [connected, client]);
+
+  // Cleanup on unmount or pin change
+  useEffect(() => {
+    return () => {
+      if (audioRecorderRef.current) {
+        audioRecorderRef.current.stop();
+        audioRecorderRef.current = null;
+      }
+      disconnect();
+      hasSentInitialIntroRef.current = false;
+    };
+  }, [pin?.event_id, disconnect]);
+
+  const handleStartLiveAPI = async () => {
+    // Prevent starting if already connecting or connected
+    if (connectionStatus === "connected" || connectionStatus === "connecting") {
+      if (connectionStatus === "connected") {
+        // Disconnect if already connected
+        await disconnect();
+        setConnectionStatus("idle");
+        hasSentInitialIntroRef.current = false;
+      }
+      return;
+    }
+
+    if (!pin || !apiKey) {
+      console.error("Cannot start Live API: missing pin or API key");
+      setConnectionStatus("error");
+      return;
+    }
+
+    setConnectionStatus("connecting");
+    hasSentInitialIntroRef.current = false;
+    shouldAutoStartRef.current = false; // Disable auto-start after manual/auto start
+
+    try {
+      const success = await connect();
+      if (!success) {
+        setConnectionStatus("error");
+      }
+    } catch (error) {
+      console.error("Error starting Live API:", error);
+      setConnectionStatus("error");
+    }
   };
+
+  // Determine if playing based on isModelTurn
+  const isPlaying = isModelTurn;
 
   if (!pin) return null;
 
@@ -137,36 +331,20 @@ export function EventDialog({ pin, language, onClose }: EventDialogProps) {
             )}
           </div>
         </div>
+      </div>
 
-        <div className="event-chat">
-          <h3>Ask a question</h3>
-          <div className="chat-history">
-            {chatHistory.map((msg, idx) => (
-              <div key={idx} className={`chat-message ${msg.role}`}>
-                <strong>{msg.role === "user" ? "You" : "Assistant"}:</strong>
-                <p>{msg.content}</p>
-              </div>
-            ))}
-          </div>
-          <div className="chat-input">
-            <input
-              type="text"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === "Enter") {
-                  handleSendQuestion();
-                }
-              }}
-              placeholder="Ask about this event..."
-            />
-            <button onClick={handleSendQuestion} disabled={!question.trim()}>
-              Send
-            </button>
-          </div>
+      {/* Atlantis Bar */}
+      <div className={`atlantis-bar ${isPlaying ? 'glowing' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <div 
+          className="atlantis-button"
+          style={{ cursor: 'default', pointerEvents: 'none', textAlign: 'center' }}
+        >
+          {connectionStatus === "idle" && (isExplaining ? "Loading article..." : "Atlantis")}
+          {connectionStatus === "connecting" && "Connecting..."}
+          {connectionStatus === "connected" && (isPlaying ? "Atlantis is speaking..." : "Atlantis is listening...")}
+          {connectionStatus === "error" && "Connection Error"}
         </div>
       </div>
     </div>
   );
 }
-

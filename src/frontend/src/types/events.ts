@@ -27,6 +27,7 @@ export interface Pin {
   significance_score: number;
   one_liner: string;
   confidence: number;
+  positivity_scale: number;
   related_event_ids?: string[] | null;
 }
 

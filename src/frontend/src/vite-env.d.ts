@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_MAPBOX_TOKEN: string
-  // Add other env variables as needed
+  readonly VITE_GEMINI_API_KEY: string
 }
 
 interface ImportMeta {

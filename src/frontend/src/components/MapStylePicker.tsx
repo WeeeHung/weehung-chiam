@@ -10,7 +10,8 @@ export type MapStyle =
   | "mapbox://styles/mapbox/streets-v12"
   | "mapbox://styles/mapbox/satellite-v9"
   | "mapbox://styles/mapbox/satellite-streets-v12"
-  | "mapbox://styles/mapbox/outdoors-v12";
+  | "mapbox://styles/mapbox/outdoors-v12"
+  | "mapbox://styles/mapbox/standard";
 
 interface MapStylePickerProps {
   value: MapStyle;
@@ -24,6 +25,7 @@ const mapStyles = [
   { value: "mapbox://styles/mapbox/satellite-v9", label: "🛰️ Satellite" },
   { value: "mapbox://styles/mapbox/satellite-streets-v12", label: "🛰️🗺️ Satellite + Streets" },
   { value: "mapbox://styles/mapbox/outdoors-v12", label: "🏔️ Outdoors" },
+  { value: "mapbox://styles/mapbox/standard", label: "🌐 Standard" },
 ] as const;
 
 export function MapStylePicker({ value, onChange }: MapStylePickerProps) {

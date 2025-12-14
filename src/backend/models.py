@@ -36,6 +36,7 @@ class Pin(BaseModel):
     significance_score: float = Field(..., ge=0, le=1, description="Significance score (0-1)")
     one_liner: str = Field(..., description="One sentence preview")
     confidence: float = Field(..., ge=0, le=1, description="Confidence score (0-1)")
+    positivity_scale: float = Field(..., ge=0, le=1, description="Positivity scale (0-1), where 1 is positive news and 0 is negative news")
     related_event_ids: Optional[List[str]] = Field(
         default=None, description="IDs of related events"
     )

@@ -2,10 +2,15 @@
 Events API router for generating pins, explanations, and chat.
 """
 
-from fastapi import APIRouter, HTTPException
+import os
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict
+from datetime import datetime, timedelta, timezone
+import json
+import asyncio
+import base64
+import io
 
 from ..models import PinsRequest, PinsResponse, ChatRequest, Pin
 from ..services.gemini import GeminiService
@@ -21,6 +26,9 @@ cache_service = CacheService()
 # Simple in-memory pin store (for MVP)
 # In production, use a database
 _pin_store: dict[str, Pin] = {}
+
+# Store active Live API sessions (conversation history per session)
+_live_sessions: Dict[str, List[Dict[str, str]]] = {}
 
 
 def _find_pin_in_cache(event_id: str, cache_service: CacheService) -> Optional[Pin]:
@@ -178,7 +186,8 @@ async def stream_explanation(event_id: str, language: str = "en"):
                 category="other",
                 significance_score=0.5,
                 one_liner="Event description",
-                confidence=0.5
+                confidence=0.5,
+                positivity_scale=0.5
             )
         
         explanation_stream = gemini_service.stream_explanation(pin, language)
@@ -273,5 +282,290 @@ async def stream_chat(event_id: str, request: ChatRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error streaming chat: {str(e)}"
+        )
+
+
+@router.websocket("/{event_id}/live/ws")
+async def live_chat_websocket(
+    websocket: WebSocket, 
+    event_id: str, 
+    language: str = Query(default="en")
+):
+    """
+    WebSocket endpoint for Live API conversation with Gemini.
+    
+    Maintains conversation state and streams responses in real-time.
+    Session ends when WebSocket closes.
+    """
+    await websocket.accept()
+    
+    # Initialize session if not exists
+    session_id = f"{event_id}_{language}"
+    if session_id not in _live_sessions:
+        _live_sessions[session_id] = []
+    
+    conversation_history = _live_sessions[session_id]
+    
+    # Get pin information
+    pin = _pin_store.get(event_id)
+    if not pin:
+        pin = _find_pin_in_cache(event_id, cache_service)
+    
+    if not pin:
+        # Create minimal pin from event_id
+        parts = event_id.split("_")
+        if len(parts) >= 2:
+            date = parts[1]
+        else:
+            date = "2025-01-01"
+        
+        pin = Pin(
+            event_id=event_id,
+            title="Event",
+            date=date,
+            lat=0.0,
+            lng=0.0,
+            location_label="Unknown",
+            category="other",
+            significance_score=0.5,
+            one_liner="Event description",
+            confidence=0.5
+        )
+    
+    try:
+        while True:
+            # Receive message from client (can be text or binary for audio)
+            try:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
+            except:
+                # Try receiving as bytes (for audio)
+                try:
+                    data = await websocket.receive_bytes()
+                    # For now, handle audio as base64 in text messages
+                    continue
+                except:
+                    continue
+            
+            if message_data.get("type") == "audio":
+                # Handle audio input (text transcript from speech recognition)
+                audio_data_base64 = message_data.get("data", "")
+                audio_format = message_data.get("format", "text")
+                
+                if not audio_data_base64:
+                    continue
+                
+                try:
+                    # Decode base64 to get text transcript
+                    if audio_format == "text":
+                        user_transcript = base64.b64decode(audio_data_base64).decode('utf-8')
+                    else:
+                        # For actual audio, would need speech-to-text here
+                        user_transcript = "[Audio input received]"
+                    
+                    if not user_transcript.strip():
+                        continue
+                    
+                    # Build system prompt with event context
+                    system_prompt = f"""You are a helpful assistant with access to web search, answering questions about an event.
+
+Event Context:
+- Title: {pin.title}
+- Date: {pin.date}
+- Location: {pin.location_label}
+- Category: {pin.category}
+- Significance: {pin.significance_score}
+
+You have access to web search capabilities. Use web search to find current, accurate information about this event and related topics. Provide detailed, well-researched answers based on web search results when relevant.
+
+Respond in {language}. Be conversational and helpful. Keep responses concise for voice output."""
+                    
+                    # Build conversation context (no history logging as requested)
+                    conversation_context = ""
+                    # Only use last 3 messages for context to keep it minimal
+                    for msg in conversation_history[-3:]:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        conversation_context += f"{role.capitalize()}: {content}\n"
+                    
+                    user_prompt = f"""{conversation_context}
+
+User: {user_transcript}
+Assistant:"""
+                    
+                    # Call Gemini API with web search enabled
+                    response = gemini_service.client.models.generate_content(
+                        model=gemini_service.model,
+                        contents=[
+                            {"role": "user", "parts": [{"text": system_prompt}]},
+                            {"role": "user", "parts": [{"text": user_prompt}]}
+                        ],
+                        config={
+                            "temperature": 0.7,
+                            "max_output_tokens": 1000,  # Shorter for voice
+                            "tools": [{"google_search": {}}],  # Enable web search
+                        }
+                    )
+                    
+                    assistant_response = response.text
+                    
+                    # For voice output, we need to convert text to speech
+                    # For now, we'll send the text and let the client handle TTS
+                    # In production, use a TTS service or Gemini's audio output
+                    
+                    # Simulate audio response by encoding text as base64
+                    # In production, use actual TTS to generate audio
+                    audio_response_base64 = base64.b64encode(assistant_response.encode('utf-8')).decode('utf-8')
+                    
+                    await websocket.send_json({
+                        "type": "audio",
+                        "data": audio_response_base64,
+                        "format": "text"  # Indicates this is text that needs TTS
+                    })
+                    
+                    await websocket.send_json({"type": "done"})
+                    
+                    # Don't log conversation history as requested
+                    # conversation_history.append({"role": "assistant", "content": assistant_response})
+                    
+                except Exception as e:
+                    error_msg = f"Error processing audio: {str(e)}"
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": error_msg
+                    })
+                    print(f"Audio processing error: {e}")
+            
+            elif message_data.get("type") == "message":
+                # Handle text message (fallback)
+                user_message = message_data.get("content", "")
+                
+                if not user_message.strip():
+                    continue
+                
+                # Generate response using Gemini with web search
+                try:
+                    # Build system prompt with event context
+                    system_prompt = f"""You are a helpful assistant with access to web search, answering questions about an event.
+
+Event Context:
+- Title: {pin.title}
+- Date: {pin.date}
+- Location: {pin.location_label}
+- Category: {pin.category}
+- Significance: {pin.significance_score}
+
+You have access to web search capabilities. Use web search to find current, accurate information about this event and related topics. Provide detailed, well-researched answers based on web search results when relevant.
+
+Respond in {language}. Be conversational and helpful."""
+                    
+                    user_prompt = f"User: {user_message}\nAssistant:"
+                    
+                    # Call Gemini API with web search enabled
+                    response = gemini_service.client.models.generate_content(
+                        model=gemini_service.model,
+                        contents=[
+                            {"role": "user", "parts": [{"text": system_prompt}]},
+                            {"role": "user", "parts": [{"text": user_prompt}]}
+                        ],
+                        config={
+                            "temperature": 0.7,
+                            "max_output_tokens": 2000,
+                            "tools": [{"google_search": {}}],  # Enable web search
+                        }
+                    )
+                    
+                    assistant_response = response.text
+                    
+                    # Send as audio (text encoded for now)
+                    audio_response_base64 = base64.b64encode(assistant_response.encode('utf-8')).decode('utf-8')
+                    
+                    await websocket.send_json({
+                        "type": "audio",
+                        "data": audio_response_base64,
+                        "format": "text"
+                    })
+                    
+                    await websocket.send_json({"type": "done"})
+                    
+                except Exception as e:
+                    error_msg = f"Error generating response: {str(e)}"
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": error_msg
+                    })
+                    print(f"Gemini API error: {e}")
+            
+    except WebSocketDisconnect:
+        # Clean up session when client disconnects
+        if session_id in _live_sessions:
+            # Optionally keep history for a while, or delete immediately
+            # For now, delete immediately
+            del _live_sessions[session_id]
+        print(f"WebSocket disconnected for session: {session_id}")
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Connection error: {str(e)}"
+            })
+        except:
+            pass
+        # Clean up on error
+        if session_id in _live_sessions:
+            del _live_sessions[session_id]
+
+
+@router.post("/ephemeral-token")
+async def create_ephemeral_token():
+    """
+    Create an ephemeral token for client-side Live API connections.
+    
+    Returns a short-lived token that can be used instead of the API key
+    for enhanced security when connecting from the browser.
+    """
+    try:
+        # Get the real API key from environment (server-side only)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="GEMINI_API_KEY not found in server environment"
+            )
+        
+        # Create Gemini client with v1alpha API version (required for ephemeral tokens)
+        from google import genai
+        client = genai.Client(
+            api_key=api_key,
+            http_options={'api_version': 'v1alpha'}
+        )
+        
+        # Create ephemeral token
+        # Default: 1 minute to start new session, 30 minutes total expiration
+        now = datetime.now(tz=timezone.utc)
+        expire_time = now + timedelta(minutes=30)
+        new_session_expire_time = now + timedelta(minutes=1)
+        
+        token = client.auth_tokens.create(
+            config={
+                'uses': 1,  # Token can only be used to start a single session
+                'expire_time': expire_time.isoformat(),
+                'new_session_expire_time': new_session_expire_time.isoformat(),
+                'http_options': {'api_version': 'v1alpha'},
+            }
+        )
+        
+        # Return the token name (this is what the client uses as the API key)
+        return {
+            "token": token.name,
+            "expires_at": expire_time.isoformat(),
+            "new_session_expires_at": new_session_expire_time.isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating ephemeral token: {str(e)}"
         )
 

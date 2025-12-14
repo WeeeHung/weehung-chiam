@@ -13,6 +13,7 @@ from typing import Iterator, List, Dict, Any, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 from ..models import Pin, Viewport
 from .news import GeocodingService
@@ -44,7 +45,7 @@ class GeminiService:
         date: str,
         viewport: Viewport,
         language: str = "en",
-        max_pins: int = 8
+        max_pins: int = 10
     ) -> List[Pin]:
         """
         Generate event pins for a given date and viewport.
@@ -67,9 +68,9 @@ class GeminiService:
         center_lng = (viewport.bbox.east + viewport.bbox.west) / 2
         
         # Build prompt with web search instructions
-        system_instruction = """You are a world events curator. Your task is to identify significant historical events or news that occurred on a specific date, relevant to a geographic viewport.
+        system_instruction = """You are a world events curator. Your task is to identify significant historical events or LOCAL news that occurred on a specific date, relevant to a geographic viewport.
 
-CRITICAL: You MUST use web search to find REAL, ACCURATE news and events from reliable sources for the specified date. 
+CRITICAL: You MUST use web search to find REAL, ACCURATE and LOCAL news and events from reliable sources for the specified date. 
 - Search for news articles, historical records, and verified sources
 - Reference credible news outlets, historical databases, and official records
 - Cite your sources when possible
@@ -81,21 +82,23 @@ Your job is to:
 3. Identify the EXACT LOCATION where each event occurred or is most relevant
 4. Place pins at the CLOSEST POSSIBLE LOCATION that is relevant to the news/event
 5. Ensure pins are within or as close as possible to the viewport bounding box
+6. Curate eye-catching titles and one-liners to attract attention and engagement
 
 Return STRICT JSON only - no markdown, no explanations, just valid JSON matching this exact schema:
 {
   "pins": [
     {
       "event_id": "evt_YYYY-MM-DD_location_001",
-      "title": "Event Title",
+      "title": "Eye-catching title",
       "date": "YYYY-MM-DD",
       "lat": 0.0,
       "lng": 0.0,
       "location_label": "Specific Place, City, Country",
       "category": "politics|conflict|culture|science|economics|other",
       "significance_score": 0.0-1.0,
-      "one_liner": "One sentence preview",
+      "one_liner": "Eye-catching one-liner",
       "confidence": 0.0-1.0,
+      "positivity_scale": 0.0-1.0,
       "related_event_ids": ["evt_..."] or null
     }
   ]
@@ -126,6 +129,7 @@ Guidelines:
 - Use reliable sources: major news outlets, historical databases, official records
 - Significance score: 0.9+ for major global events, 0.7-0.9 for regional, 0.5-0.7 for local
 - Confidence: 0.9+ for well-documented events from reliable sources, lower for approximate/uncertain
+- Positivity scale: 0.0-1.0 where 1.0 is positive/good news (e.g., achievements, celebrations, breakthroughs) and 0.0 is negative/bad news (e.g., conflicts, disasters, crises). Use 0.5 for neutral news. Assess the overall sentiment and impact of the event.
 - Keep neutral tone, avoid sensational language
 - Prioritize events that are geographically relevant to the viewport
 - If web search finds no events for the exact date, indicate this in the confidence score
@@ -189,11 +193,12 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     {"role": "user", "parts": [{"text": system_instruction}]},
                     {"role": "user", "parts": [{"text": user_prompt}]}
                 ],
-                config={
-                    "temperature": 0.2,  # Low temperature for structured output
-                    "max_output_tokens": token_limit,
-                    "tools": [{"google_search": {}}],  # Enable Google Search grounding
-                }
+                config=types.GenerateContentConfig( # Use the typed config
+                    temperature=0.2,
+                    tools=[types.Tool(google_search=types.GoogleSearch())], # Explicit typing
+                    response_modalities=["TEXT"], 
+                    max_output_tokens=token_limit,
+                )
             )
             
             # Parse JSON response
@@ -246,15 +251,10 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     # This ensures pins use actual geographic coordinates that don't change when map moves
                     if lat == 0 and lng == 0:
                         # Try to geocode the location
-                        # Use viewport bbox only as a preference (not a requirement) to help disambiguate
+                        # DO NOT use viewport bbox - geocode should return actual geographic coordinates
                         geocoded = self.geocoding_service.geocode_location(
-                            location_label,
-                            bbox={
-                                "west": viewport.bbox.west,
-                                "south": viewport.bbox.south,
-                                "east": viewport.bbox.east,
-                                "north": viewport.bbox.north,
-                            }
+                            location_label
+                            # Removed bbox parameter - geocoding should be viewport-independent
                         )
                         if geocoded:
                             pin_data["lat"] = geocoded["lat"]
@@ -306,11 +306,12 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=fix_prompt,
-                    config={
-                        "temperature": 0.1,
-                        "max_output_tokens": token_limit,
-                        "tools": [{"google_search": {}}],  # Enable Google Search grounding
-                    }
+                    config=types.GenerateContentConfig( # Use the typed config
+                        temperature=0.1,
+                        tools=[types.Tool(google_search=types.GoogleSearch())], # Explicit typing
+                        response_modalities=["TEXT"], 
+                        max_output_tokens=token_limit,
+                    )
                 )
                 raw_text = response.text.strip()
                 logger.info(f"Retry response length: {len(raw_text)} chars")
@@ -480,7 +481,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     if obj_start != -1:
                         # Check if this object has all required fields
                         obj_content = text[obj_start:match_end]
-                        required_fields = ['event_id', 'title', 'date', 'lat', 'lng', 'location_label', 'category', 'significance_score', 'one_liner', 'confidence']
+                        required_fields = ['event_id', 'title', 'date', 'lat', 'lng', 'location_label', 'category', 'significance_score', 'one_liner', 'confidence', 'positivity_scale']
                         missing_fields = [field for field in required_fields if f'"{field}"' not in obj_content]
                         
                         # If missing critical fields or has incomplete event_id, remove it
@@ -588,6 +589,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         pin_pattern += r',\s*"significance_score":\s*([\d.]+)'
         pin_pattern += r',\s*"one_liner":\s*"((?:[^"\\]|\\.)*)"'
         pin_pattern += r',\s*"confidence":\s*([\d.]+)'
+        pin_pattern += r',\s*"positivity_scale":\s*([\d.]+)'
         
         matches = re.finditer(pin_pattern, text, re.DOTALL)
         for match in matches:
@@ -607,6 +609,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     "significance_score": float(match.group(8)),
                     "one_liner": unescape(match.group(9)),
                     "confidence": float(match.group(10)),
+                    "positivity_scale": float(match.group(11)),
                     "related_event_ids": None
                 }
                 
@@ -654,14 +657,10 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         # If it's generic, try to geocode and get a more specific name
         if is_generic:
             try:
+                # DO NOT use viewport bbox - geocoding should return actual geographic coordinates
                 geocoded = self.geocoding_service.geocode_location(
-                    location_label,
-                    bbox={
-                        "west": viewport.bbox.west,
-                        "south": viewport.bbox.south,
-                        "east": viewport.bbox.east,
-                        "north": viewport.bbox.north,
-                    }
+                    location_label
+                    # Removed bbox parameter - geocoding should be viewport-independent
                 )
                 if geocoded and geocoded.get("display_name"):
                     # Nominatim display_name format: "Place, District, City, Region, Country"
@@ -713,7 +712,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         Yields:
             Text chunks of the news article
         """
-        prompt = f"""You are a professional news writer. Write a concise TLDR news article about this event. Include **bold** for important words.
+        prompt = f"""You are a professional news writer. Write a concise TLDR news article about this event. Include **bold** for important sentences (at least 3 instances).
 
 Event:
 - Title: {pin.title}
@@ -722,12 +721,15 @@ Event:
 - Category: {pin.category}
 - Significance: {pin.significance_score}
 
-Write a news article in {language} that reads like a brief news report. Include:
+Write a news article in {language} that reads like a brief news report. 
+IMPORTANT RULES for the ARTICLE:
 - NO TITLE as title would be provided
-- A compelling headline-style opening paragraph (2-3 sentences)
-- Key facts about what happened
-- Why this event is significant
-- Relevant context
+- DO NOT mention the lat and longitude in the article
+- DO NOT mention the significance score in the article
+- DO give A compelling headline-style opening paragraph (2-3 sentences)
+- DO include key facts about what happened
+- DO include why this event is significant
+- DO include relevant context
 
 Keep it concise (200-300 words). Write in a journalistic style as a TLDR - users can ask for more details if needed."""
 

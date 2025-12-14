@@ -72,7 +72,7 @@ function AppContent() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setCanFetchEvents(true);
-    }, 2000);
+    }, 3500);
 
     return () => clearTimeout(timer);
   }, []);

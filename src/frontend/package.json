@@ -9,11 +9,13 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@google/genai": "^1.33.0",
     "@mantine/core": "^8.3.10",
     "@mantine/dates": "^8.3.10",
     "@mantine/hooks": "^8.3.10",
     "@tanstack/react-query": "^5.17.0",
     "dayjs": "^1.11.19",
+    "eventemitter3": "^5.0.1",
     "mapbox-gl": "^3.0.1",
     "react": "^18.2.0",
     "react-datepicker": "^4.25.0",

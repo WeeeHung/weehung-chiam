@@ -26,7 +26,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <Group className="app-shell" justify="space-between" align="center" p="md">
-      <Group gap="xs">
+      {/* <Group gap="xs">
         <ActionIcon variant="subtle" size="lg" title="Explore">
           <span>🔍</span>
         </ActionIcon>
@@ -36,7 +36,7 @@ export function AppShell({
         <ActionIcon variant="subtle" size="lg" title="Profile">
           <span>👤</span>
         </ActionIcon>
-      </Group>
+      </Group> */}
       
       <Title order={4} fw={500} className="app-shell-title">
         Atlantis: World News / History

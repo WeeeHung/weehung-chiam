@@ -140,14 +140,14 @@ class GeocodingService:
     def geocode_location(
         self,
         location_name: str,
-        bbox: Optional[Dict[str, float]] = None
+        bbox: Optional[Dict[str, float]] = None  # Keep parameter for backward compatibility, but don't use it
     ) -> Optional[Dict[str, float]]:
         """
         Geocode a location name to lat/lng coordinates.
         
         Args:
             location_name: Name of the location (city, country, etc.)
-            bbox: Optional bounding box to prioritize results within viewport
+            bbox: DEPRECATED - Not used. Geocoding should return actual geographic coordinates.
             
         Returns:
             Dict with 'lat' and 'lng' keys, or None if not found
@@ -160,13 +160,9 @@ class GeocodingService:
                 "addressdetails": 1,
             }
             
-            # Add bbox to prioritize results within viewport (but don't restrict to it)
-            # Using viewbox without bounded=1 allows Nominatim to prefer results in the area
-            # but still return actual geographic coordinates if the location is outside
-            if bbox:
-                params["viewbox"] = f"{bbox['west']},{bbox['south']},{bbox['east']},{bbox['north']}"
-                # Don't use bounded=1 - this would restrict results to viewport only
-                # We want actual geographic coordinates, not viewport-relative ones
+            # DO NOT use viewbox parameter - geocoding should return actual geographic coordinates
+            # regardless of current map viewport. This ensures pins don't shift when map moves.
+            # Removed: if bbox: params["viewbox"] = ...
             
             headers = {
                 "User-Agent": "Atlantis-WorldNews/1.0"  # Required by Nominatim

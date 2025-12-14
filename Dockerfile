@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Atlantis - World News/History Map Explorer
 
 # Stage 1: Build frontend
-FROM node:18-alpine AS frontend-builder
+FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -16,10 +16,6 @@ COPY src/frontend/ ./
 
 # Build frontend (production build)
 # Note: VITE_MAPBOX_TOKEN and VITE_GEMINI_API_KEY should be provided at build time via --build-arg
-ARG VITE_MAPBOX_TOKEN
-ARG VITE_GEMINI_API_KEY
-ENV VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
-ENV VITE_GEMINI_API_KEY=${VITE_GEMINI_API_KEY}
 
 RUN npm run build
 

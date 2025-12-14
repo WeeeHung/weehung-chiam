@@ -24,22 +24,23 @@ python3 -c "
 import sys
 import os
 
-# Add src/backend to path
-backend_path = os.path.join(os.path.dirname(__file__), 'src', 'backend')
-sys.path.insert(0, backend_path)
+# Add src to path (use current working directory since __file__ doesn't exist with -c)
+project_root = os.getcwd()
+src_path = os.path.join(project_root, 'src')
+sys.path.insert(0, src_path)
 
 try:
     # Test agent modules
-    from services.agent import Planner, Executor, Memory
+    from backend.services.agent import Planner, Executor, Memory
     print('  ✓ Agent modules imported successfully')
     
     # Test backend modules
-    from routers import events
-    from services import gemini, cache, news
+    from backend.routers import events
+    from backend.services import gemini, cache, news
     print('  ✓ Backend modules imported successfully')
     
     # Test main app (without initializing services that need API keys)
-    from main import app
+    from backend.main import app
     print('  ✓ FastAPI app imported successfully')
     
 except ImportError as e:

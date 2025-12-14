@@ -138,7 +138,7 @@ An interactive world map explorer that displays historical events and news as pi
      --build-arg VITE_GEMINI_API_KEY=your_gemini_api_key_here \
      -t atlantis .
 
-   docker run -p 8000:8000 -e GEMINI_API_KEY=your_gemini_api_key_here atlantis
+   docker run -p 8000:8000 --env-file .env -e GEMINI_API_KEY=your_gemini_api_key_here atlantis
    ```
 
    **Troubleshooting:**

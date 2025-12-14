@@ -22,8 +22,10 @@ interface AtlantisBarProps {
   // Navigation callbacks
   onNavigateToLocation?: (viewport: Viewport) => void;
   onLanguageChange?: (language: string) => void;
-  onDateChange?: (date: string) => void;
+  onDateChange?: (startDate: string, endDate: string) => void;
   onManualFetch?: () => void;
+  onHomeClick?: () => void;
+  onRandomClick?: () => void;
   
   // Current state
   currentLanguage: string;
@@ -90,6 +92,8 @@ export function AtlantisBar({
   onLanguageChange,
   onDateChange,
   onManualFetch,
+  onHomeClick,
+  onRandomClick,
   currentLanguage,
 }: AtlantisBarProps) {
   const [isListening, setIsListening] = useState(false);
@@ -161,13 +165,13 @@ export function AtlantisBar({
           onLanguageChange(parsed.language);
         }
 
-        // Handle date change
-        if (parsed.date && onDateChange) {
-          onDateChange(parsed.date);
+        // Handle date change (now uses start_date and end_date)
+        if (parsed.start_date && parsed.end_date && onDateChange) {
+          onDateChange(parsed.start_date, parsed.end_date);
         }
 
         // Log if nothing was extracted
-        if (!parsed.location && !parsed.language && !parsed.date) {
+        if (!parsed.location && !parsed.language && !parsed.start_date && !parsed.end_date) {
           console.log("No valid entities extracted from:", transcript);
         }
 
@@ -309,6 +313,18 @@ export function AtlantisBar({
     }
   }, [onManualFetch]);
 
+  const handleHomeClick = useCallback(() => {
+    if (onHomeClick) {
+      onHomeClick();
+    }
+  }, [onHomeClick]);
+
+  const handleRandomClick = useCallback(() => {
+    if (onRandomClick) {
+      onRandomClick();
+    }
+  }, [onRandomClick]);
+
   return (
     <div className={`atlantis-bar ${isGlowing ? 'glowing' : ''}`} onClick={(e) => e.stopPropagation()}>
       <div 
@@ -318,14 +334,32 @@ export function AtlantisBar({
         {displayText}
       </div>
       {!isInDialog && (
-        <button
-          className="record-button"
-          onClick={handleManualFetch}
-          title="Fetch pins for current view"
-          style={{ marginLeft: '8px' }}
-        >
-          🔍
-        </button>
+        <>
+          <button
+            className="record-button"
+            onClick={handleHomeClick}
+            title="Go to home location (NYC)"
+            style={{ marginLeft: '8px' }}
+          >
+            🏠
+          </button>
+          <button
+            className="record-button"
+            onClick={handleRandomClick}
+            title="Jump to random historic event"
+            style={{ marginLeft: '8px' }}
+          >
+            🎲
+          </button>
+          <button
+            className="record-button"
+            onClick={handleManualFetch}
+            title="Fetch pins for current view"
+            style={{ marginLeft: '8px' }}
+          >
+            🔍
+          </button>
+        </>
       )}
     </div>
   );

@@ -42,16 +42,18 @@ class GeminiService:
     
     def generate_pins(
         self,
-        date: str,
+        start_date: str,
+        end_date: str,
         viewport: Viewport,
         language: str = "en",
         max_pins: int = 10
     ) -> List[Pin]:
         """
-        Generate event pins for a given date and viewport.
+        Generate event pins for a given date range and viewport.
         
         Args:
-            date: Date in YYYY-MM-DD format
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
             viewport: Map viewport with bbox and zoom
             language: Language code
             max_pins: Maximum number of pins to generate
@@ -68,7 +70,7 @@ class GeminiService:
         center_lng = (viewport.bbox.east + viewport.bbox.west) / 2
         
         # Build prompt with web search instructions
-        system_instruction = """You are a world events curator. Your task is to identify significant historical events or LOCAL news that occurred on a specific date, relevant to a geographic viewport.
+        system_instruction = """You are a world events curator. Your task is to identify significant historical events or LOCAL news that occurred on a specific date or date period, relevant to a geographic viewport.
 
 CRITICAL: You MUST use web search to find REAL, ACCURATE and LOCAL news and events from reliable sources for the specified date. 
 - Search for news articles, historical records, and verified sources
@@ -135,14 +137,22 @@ Guidelines:
 - If web search finds no events for the exact date, indicate this in the confidence score
 """
         
-        # Parse date to extract year for emphasis
+        # Parse dates to extract information
         try:
-            date_obj = datetime.strptime(date, "%Y-%m-%d")
-            year = date_obj.year
-            month_day = date_obj.strftime("%B %d")
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
+            start_year = start_date_obj.year
+            end_year = end_date_obj.year
+            start_month_day = start_date_obj.strftime("%B %d")
+            end_month_day = end_date_obj.strftime("%B %d")
         except:
-            year = date.split("-")[0] if "-" in date else "unknown"
-            month_day = date
+            start_year = start_date.split("-")[0] if "-" in start_date else "unknown"
+            end_year = end_date.split("-")[0] if "-" in end_date else "unknown"
+            start_month_day = start_date
+            end_month_day = end_date
+        
+        # Check if it's a single day
+        is_single_day = start_date == end_date
         
         # Calculate approximate region name from viewport for better web search
         center_lat = (viewport.bbox.north + viewport.bbox.south) / 2
@@ -154,15 +164,24 @@ Guidelines:
             # For local view, provide approximate region
             region_context = f"Region: Approximately centered at {center_lat:.2f}°N, {center_lng:.2f}°E"
         
-        user_prompt = f"""Date: {date} (Year: {year}, {month_day})
+        # Build date range description
+        if is_single_day:
+            date_range_desc = f"{start_date} ({start_year}, {start_month_day})"
+            date_instruction = f"CRITICAL: You MUST only return events that occurred on {start_date} (the EXACT year {start_year}, month, and day). DO NOT return events from other years, even if they occurred on {start_month_day} in a different year."
+            search_instruction = f"- Search for: \"news {start_date}\" OR \"events {start_date}\" OR \"{start_month_day} {start_year} news\""
+        else:
+            date_range_desc = f"{start_date} to {end_date} ({start_year} to {end_year})"
+            date_instruction = f"CRITICAL: You MUST only return events that occurred between {start_date} and {end_date} (inclusive). Events can be from any day within this date range."
+            search_instruction = f"- Search for: \"news {start_date} to {end_date}\" OR \"events {start_date} to {end_date}\" OR \"news from {start_date} to {end_date}\""
+        
+        user_prompt = f"""Date Range: {date_range_desc}
 
-CRITICAL: You MUST only return events that occurred on {date} (the EXACT year {year}, month, and day). 
-DO NOT return events from other years, even if they occurred on {month_day} in a different year.
+{date_instruction}
 
 MANDATORY WEB SEARCH:
-- You MUST use web search to find real news and events for {date}
-- Search for: "news {date}" OR "events {date}" OR "{month_day} {year} news"
-- Include region-specific searches if relevant: "{month_day} {year} [region] news"
+- You MUST use web search to find real news and events for the date range {start_date} to {end_date}
+{search_instruction}
+- Include region-specific searches if relevant: \"[region] news {start_date} to {end_date}\"
 - Only use information from reliable sources found via web search
 - Cite sources when possible
 - Web search MUST be performed every time to get the most current and accurate information
@@ -173,14 +192,14 @@ MUST Respond in {language}.
 Focus: {"Local events within viewport" if is_local else "Globally significant events, but prioritize viewport region"}
 Max pins: {max_pins}
 
-Generate pins for significant events on {date} (ONLY events from year {year}). For each event:
-1. Use web search to find the event - ensure the event date matches {date} exactly
+Generate pins for significant events between {start_date} and {end_date} (inclusive). For each event:
+1. Use web search to find the event - ensure the event date is within the range {start_date} to {end_date}
 2. Identify the EXACT, SPECIFIC location where it occurred (e.g., "Marina Bay", "Times Square", "Westminster", NOT just "Singapore", "New York", "London")
 3. Use accurate lat/lng coordinates for that specific location
 4. Ensure the location is within or as close as possible to the viewport bbox
 5. If the event location is outside the viewport but relevant, place it at the closest relevant point within or near the viewport
 6. location_label MUST be specific: use districts, neighborhoods, landmarks, or notable places, not just city/country names
-7. The "date" field in each pin MUST be exactly "{date}" - same year ({year}), month, and day
+7. The "date" field in each pin MUST be a date within the range {start_date} to {end_date} (YYYY-MM-DD format)
 8. Base your information on web search results from reliable sources"""
 
         try:
@@ -232,10 +251,10 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
             pins = []
             for pin_data in pins_data[:max_pins]:
                 try:
-                    # CRITICAL: Validate that the pin date matches the requested date exactly
+                    # CRITICAL: Validate that the pin date is within the requested date range
                     pin_date = pin_data.get("date", "")
-                    if pin_date != date:
-                        logger.warning(f"Skipping pin with mismatched date: pin_date={pin_date}, requested_date={date}")
+                    if not self._is_date_in_range(pin_date, start_date, end_date):
+                        logger.warning(f"Skipping pin with date outside range: pin_date={pin_date}, range={start_date} to {end_date}")
                         continue
                     
                     # Validate and potentially geocode location
@@ -251,7 +270,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     # This ensures pins use actual geographic coordinates that don't change when map moves
                     if lat == 0 and lng == 0:
                         # Try to geocode the location
-                        # DO NOT use viewport bbox - geocode should return actual geographic coordinates
+                        # DO NOT use viewport bbox - geocoding should return actual geographic coordinates
                         geocoded = self.geocoding_service.geocode_location(
                             location_label
                             # Removed bbox parameter - geocoding should be viewport-independent
@@ -272,8 +291,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     pin_data["lat"] = max(-90, min(90, pin_data.get("lat", 0)))
                     pin_data["lng"] = max(-180, min(180, pin_data.get("lng", 0)))
                     
-                    # Ensure the date field matches exactly
-                    pin_data["date"] = date
+                    # Keep the pin's date as-is (it's already validated to be in range)
                     
                     pin = Pin(**pin_data)
                     pins.append(pin)
@@ -291,7 +309,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
             failed_text = text if 'text' in locals() else raw_text if 'raw_text' in locals() else ""
             
             # Try to extract valid pins from partial JSON
-            partial_pins = self._extract_partial_pins(failed_text, required_date=date)
+            partial_pins = self._extract_partial_pins(failed_text, start_date=start_date, end_date=end_date)
             if partial_pins:
                 logger.info(f"Extracted {len(partial_pins)} valid pins from partial JSON")
                 return partial_pins
@@ -324,7 +342,7 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     logger.error(f"Retry JSON parse error at line {retry_error.lineno}, col {retry_error.colno}: {retry_error.msg}")
                     logger.error(f"Retry problematic text around error (char {retry_error.pos}): {text[max(0, retry_error.pos-100):retry_error.pos+100]}")
                     # Try partial extraction one more time
-                    partial_pins = self._extract_partial_pins(text, required_date=date)
+                    partial_pins = self._extract_partial_pins(text, start_date=start_date, end_date=end_date)
                     if partial_pins:
                         logger.info(f"Extracted {len(partial_pins)} valid pins from retry partial JSON")
                         return partial_pins
@@ -340,16 +358,15 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                 
                 pins = []
                 for p in pins_data[:max_pins]:
-                    # CRITICAL: Validate that the pin date matches the requested date exactly
+                    # CRITICAL: Validate that the pin date is within the requested date range
                     pin_date = p.get("date", "")
-                    if pin_date != date:
-                        logger.warning(f"Skipping pin with mismatched date: pin_date={pin_date}, requested_date={date}")
+                    if not self._is_date_in_range(pin_date, start_date, end_date):
+                        logger.warning(f"Skipping pin with date outside range: pin_date={pin_date}, range={start_date} to {end_date}")
                         continue
                     
                     if self._validate_pin(p):
                         try:
-                            # Ensure the date field matches exactly
-                            p["date"] = date
+                            # Keep the pin's date as-is (it's already validated to be in range)
                             pins.append(Pin(**p))
                         except Exception as pin_error:
                             print(f"Warning: Failed to create pin: {pin_error}")
@@ -361,6 +378,16 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         except Exception as e:
             print(f"Error generating pins: {e}")
             return []
+    
+    def _is_date_in_range(self, date_str: str, start_date: str, end_date: str) -> bool:
+        """Check if a date string is within the given date range (inclusive)."""
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            return start_obj <= date_obj <= end_obj
+        except (ValueError, AttributeError):
+            return False
     
     def _validate_pin(self, pin_data: Dict[str, Any]) -> bool:
         """Validate pin data structure."""
@@ -565,14 +592,15 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
         
         return '\n'.join(fixed_lines)
     
-    def _extract_partial_pins(self, text: str, required_date: str = None) -> List[Pin]:
+    def _extract_partial_pins(self, text: str, start_date: str = None, end_date: str = None) -> List[Pin]:
         """
         Try to extract valid pin objects from partial/invalid JSON.
         Uses regex to find complete pin objects even if the overall JSON is invalid.
         
         Args:
             text: Text containing JSON (possibly invalid)
-            required_date: If provided, only extract pins matching this exact date
+            start_date: If provided, only extract pins with dates >= start_date
+            end_date: If provided, only extract pins with dates <= end_date
         """
         pins = []
         
@@ -613,14 +641,11 @@ Generate pins for significant events on {date} (ONLY events from year {year}). F
                     "related_event_ids": None
                 }
                 
-                # CRITICAL: Validate that the pin date matches the required date if specified
-                if required_date and pin_data.get("date", "") != required_date:
-                    logger.debug(f"Skipping partial pin with mismatched date: pin_date={pin_data.get('date')}, required_date={required_date}")
+                # CRITICAL: Validate that the pin date is within the date range if specified
+                pin_date = pin_data.get("date", "")
+                if start_date and end_date and not self._is_date_in_range(pin_date, start_date, end_date):
+                    logger.debug(f"Skipping partial pin with date outside range: pin_date={pin_date}, range={start_date} to {end_date}")
                     continue
-                
-                # Ensure date matches if required_date is provided
-                if required_date:
-                    pin_data["date"] = required_date
                 
                 # Validate and create pin
                 if self._validate_pin(pin_data):

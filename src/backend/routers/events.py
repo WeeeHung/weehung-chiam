@@ -64,14 +64,15 @@ def _find_pin_in_cache(event_id: str, cache_service: CacheService) -> Optional[P
 @router.post("/pins", response_model=PinsResponse)
 async def generate_pins(request: PinsRequest) -> PinsResponse:
     """
-    Generate event pins for a given date and viewport.
+    Generate event pins for a given date range and viewport.
     
     Returns cached result if available, otherwise generates new pins.
-    Accumulates pins across different viewports for the same date.
+    Accumulates pins across different viewports for the same date range.
     """
     # Check viewport-specific cache first (for fast lookup)
     cache_key = cache_service.get_pins_key(
-        date=request.date,
+        start_date=request.start_date,
+        end_date=request.end_date,
         bbox={
             "west": request.viewport.bbox.west,
             "south": request.viewport.bbox.south,
@@ -90,28 +91,31 @@ async def generate_pins(request: PinsRequest) -> PinsResponse:
         for pin in cached_pins:
             _pin_store[pin.event_id] = pin
         
-        # Also ensure these pins are in the date-accumulated cache
-        cache_service.merge_and_set_date_pins(
-            request.date,
+        # Also ensure these pins are in the date range accumulated cache
+        cache_service.merge_and_set_date_range_pins(
+            request.start_date,
+            request.end_date,
             request.language,
             cached_pins
         )
         
-        return PinsResponse(date=request.date, pins=cached_pins)
+        return PinsResponse(start_date=request.start_date, end_date=request.end_date, pins=cached_pins)
     
     # Generate new pins
     try:
         new_pins = gemini_service.generate_pins(
-            date=request.date,
+            start_date=request.start_date,
+            end_date=request.end_date,
             viewport=request.viewport,
             language=request.language,
             max_pins=request.max_pins
         )
         
-        # Merge new pins with accumulated pins for this date
+        # Merge new pins with accumulated pins for this date range
         # This ensures pins are accumulated across different viewports
-        merged_pins = cache_service.merge_and_set_date_pins(
-            request.date,
+        merged_pins = cache_service.merge_and_set_date_range_pins(
+            request.start_date,
+            request.end_date,
             request.language,
             new_pins
         )
@@ -123,18 +127,85 @@ async def generate_pins(request: PinsRequest) -> PinsResponse:
         for pin in merged_pins:
             _pin_store[pin.event_id] = pin
         
-        # Return the merged pins (all accumulated pins for this date)
-        return PinsResponse(date=request.date, pins=merged_pins)
+        # Return the merged pins (all accumulated pins for this date range)
+        return PinsResponse(start_date=request.start_date, end_date=request.end_date, pins=merged_pins)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating pins: {str(e)}")
 
 
+def _parse_date_period(date_str: str) -> tuple[str, str]:
+    """
+    Parse a date string and return start_date and end_date.
+    
+    Handles:
+    - Single date (YYYY-MM-DD): start_date = end_date = that date
+    - Year (YYYY): start_date = YYYY-01-01, end_date = YYYY-12-31
+    - Month (YYYY-MM): start_date = YYYY-MM-01, end_date = last day of that month
+    - Relative dates: "today", "yesterday" -> single day
+    - Default: last 7 days
+    
+    Returns:
+        Tuple of (start_date, end_date) in YYYY-MM-DD format
+    """
+    from datetime import datetime, timedelta
+    from calendar import monthrange
+    
+    today = datetime.now().date()
+    
+    if not date_str or date_str.lower() in ["null", "none", ""]:
+        # Default: last 7 days
+        end_date = today
+        start_date = today - timedelta(days=6)  # 7 days inclusive
+        return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+    
+    date_str = date_str.strip()
+    
+    # Handle relative dates
+    if date_str.lower() == "today":
+        date_str = today.strftime('%Y-%m-%d')
+    elif date_str.lower() == "yesterday":
+        date_str = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    # Try to parse as different formats
+    try:
+        # Try YYYY-MM-DD (single date)
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            return date_str, date_str  # Same start and end for single day
+        
+        # Try YYYY-MM (month)
+        if len(date_str) == 7 and date_str.count('-') == 1:
+            year, month = map(int, date_str.split('-'))
+            start_date = datetime(year, month, 1).date()
+            last_day = monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day).date()
+            return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+        
+        # Try YYYY (year)
+        if len(date_str) == 4 and date_str.isdigit():
+            year = int(date_str)
+            start_date = datetime(year, 1, 1).date()
+            end_date = datetime(year, 12, 31).date()
+            return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+        
+        # If we can't parse it, try as single date anyway
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        return date_str, date_str
+        
+    except (ValueError, AttributeError):
+        # If parsing fails, default to last 7 days
+        end_date = today
+        start_date = today - timedelta(days=6)
+        return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+
+
 @router.post("/parse-command", response_model=ParseCommandResponse)
 async def parse_command(request: ParseCommandRequest):
     """
-    Parse voice command to extract location (with geocoding), language, and date.
+    Parse voice command to extract location (with geocoding), language, and date period.
     Uses Gemini Flash for accurate entity extraction, then geocodes the location.
+    Handles date periods: single day, month, year, or defaults to last 7 days.
     """
     from datetime import datetime, timedelta
     from ..services.news import GeocodingService
@@ -144,21 +215,26 @@ async def parse_command(request: ParseCommandRequest):
     # Get current date for relative date handling
     today = datetime.now().date()
     yesterday = today - timedelta(days=1)
+    default_start = today - timedelta(days=6)  # Last 7 days
     
     # System prompt for extraction
-    system_instruction = """You are a command parser that extracts location name, language code, and date from user voice commands. 
+    system_instruction = """You are a command parser that extracts location name, language code, and date/date period from user voice commands. 
     The user may mention an event or a news article, deduce the most likely intention and extract the location name, language code, and date accordingly.
 
 Extract:
 1. LOCATION_NAME: The place/city/country mentioned (e.g., "Tokyo", "New York", "Johor Bahru"). Return just the location name, nothing else.
 2. LANGUAGE: 2-letter ISO code (en, zh, ja, es, fr, de, ko, pt, ru, ar, hi) - extract from phrases like "in chinese" or infer from context
-3. DATE: YYYY-MM-DD format - handle "today", "yesterday", or parse specific dates
+3. DATE_PERIOD: Can be:
+   - Single date: "YYYY-MM-DD" (e.g., "2024-12-14", "today", "yesterday")
+   - Month: "YYYY-MM" (e.g., "2024-12" for December 2024)
+   - Year: "YYYY" (e.g., "2024" for the entire year 2024)
+   - If not specified, return null (will default to last 7 days)
 
 Return ONLY valid JSON with this exact structure:
 {
   "location_name": "string or null",
   "language": "string or null", 
-  "date": "YYYY-MM-DD or null"
+  "date_period": "YYYY-MM-DD or YYYY-MM or YYYY or 'today' or 'yesterday' or null"
 }"""
     
     user_prompt = f"""Parse this voice command:
@@ -167,8 +243,9 @@ Command: "{request.text}"
 
 Current date: {today.strftime('%Y-%m-%d')}
 Yesterday: {yesterday.strftime('%Y-%m-%d')}
+Default period (if not specified): last 7 days ({default_start.strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')})
 
-Extract location_name, language, and date. Return JSON only."""
+Extract location_name, language, and date_period. Return JSON only."""
     
     try:
         # Call Gemini Flash (fastest model)
@@ -199,7 +276,7 @@ Extract location_name, language, and date. Return JSON only."""
         
         location_name = parsed.get("location_name")
         language = parsed.get("language")
-        date = parsed.get("date")
+        date_period = parsed.get("date_period")
         
         # Geocode location if found
         location_result = None
@@ -215,27 +292,39 @@ Extract location_name, language, and date. Return JSON only."""
             except Exception as e:
                 logger.warning(f"Geocoding failed for '{location_name}': {e}")
         
-        # Clean up language and date
+        # Clean up language
         if language and language.lower() in ["null", "none", ""]:
             language = None
-        if date and date.lower() in ["null", "none", ""]:
-            date = None
+        
+        # Parse date period to start_date and end_date
+        start_date, end_date = _parse_date_period(date_period)
         
         return ParseCommandResponse(
             location=location_result,
             language=language,
-            date=date
+            start_date=start_date,
+            end_date=end_date
         )
     
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON from Gemini response: {e}")
         logger.debug(f"Response text: {response_text}")
-        # Fallback: return empty response
-        return ParseCommandResponse()
+        # Fallback: return default date range (last 7 days)
+        default_start_str = default_start.strftime('%Y-%m-%d')
+        default_end_str = today.strftime('%Y-%m-%d')
+        return ParseCommandResponse(
+            start_date=default_start_str,
+            end_date=default_end_str
+        )
     except Exception as e:
         logger.error(f"Error parsing command: {str(e)}")
-        # Return empty response on error
-        return ParseCommandResponse()
+        # Return default date range on error
+        default_start_str = default_start.strftime('%Y-%m-%d')
+        default_end_str = today.strftime('%Y-%m-%d')
+        return ParseCommandResponse(
+            start_date=default_start_str,
+            end_date=default_end_str
+        )
 
 
 @router.get("/{event_id}/explain/stream")
@@ -627,6 +716,151 @@ Respond in {language}. Be conversational and helpful."""
         # Clean up on error
         if session_id in _live_sessions:
             del _live_sessions[session_id]
+
+
+@router.get("/random-event", response_model=ParseCommandResponse)
+async def get_random_event():
+    """
+    Get a random interesting historic event with location and date.
+    Uses Gemini to find an interesting historic event (e.g., NATO treaty, US independence,
+    Chicago Bulls second 3-peat, opening of a national park, peace treaty, Japan surrender, etc.)
+    and returns the exact location and date.
+    """
+    from ..services.news import GeocodingService
+    
+    geocoding_service = GeocodingService()
+    
+    # System prompt for finding interesting historic events
+    system_instruction = """You are a historian that finds interesting and significant historic events from world history. This event can be in any era, any country, any topic.
+
+Find a random, interesting historic event that is:
+- Significant and well-documented
+- Has a specific date (YYYY-MM-DD format)
+- Has a specific location (city, country, or landmark)
+- Is interesting and educational (e.g., NATO treaty signing, US Declaration of Independence, 
+  Chicago Bulls second 3-peat championship, opening of a US national park, peace treaties, 
+  Japan surrender in WWII, moon landing, fall of Berlin Wall, etc.)
+
+Return ONLY valid JSON with this exact structure:
+{
+  "event_name": "Brief name of the event",
+  "location_name": "Specific location name (city, country, or landmark)",
+  "date": "YYYY-MM-DD"
+}
+
+Examples:
+- {"event_name": "NATO Treaty Signing", "location_name": "Washington, D.C.", "date": "1949-04-04"}
+- {"event_name": "US Declaration of Independence", "location_name": "Philadelphia", "date": "1776-07-04"}
+- {"event_name": "Chicago Bulls Second 3-Peat", "location_name": "Chicago", "date": "1998-06-14"}
+- {"event_name": "Yellowstone National Park Opening", "location_name": "Yellowstone National Park", "date": "1872-03-01"}
+- {"event_name": "Japan Surrender WWII", "location_name": "Tokyo Bay", "date": "1945-09-02"}
+- {"event_name": "Fall of Berlin Wall", "location_name": "Berlin", "date": "1989-11-09"}
+- {"event_name": "Apollo 11 Moon Landing", "location_name": "Sea of Tranquility", "date": "1969-07-20"}
+
+Pick a different interesting event each time. Vary the time periods and locations."""
+    
+    user_prompt = """Find a random interesting historic event and return its location name and exact date in JSON format."""
+    
+    try:
+        # Call Gemini Flash (fastest model)
+        response = gemini_service.client.models.generate_content(
+            model="gemini-2.0-flash-exp",  # Fastest model
+            contents=[
+                {"role": "user", "parts": [{"text": system_instruction}]},
+                {"role": "user", "parts": [{"text": user_prompt}]}
+            ],
+            config=types.GenerateContentConfig(
+                temperature=1.2,  # Higher temperature for variety
+                response_modalities=["TEXT"],
+                max_output_tokens=200,
+            )
+        )
+        
+        # Extract JSON from response
+        response_text = response.text.strip()
+        
+        # Remove markdown code blocks if present
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        # Parse JSON
+        parsed = json.loads(response_text)
+        
+        location_name = parsed.get("location_name")
+        date_str = parsed.get("date")
+        
+        # Geocode location if found
+        location_result = None
+        if location_name and location_name.lower() not in ["null", "none", ""]:
+            try:
+                geocoded = geocoding_service.geocode_location(location_name)
+                if geocoded:
+                    location_result = {
+                        "lat": geocoded["lat"],
+                        "lng": geocoded["lng"],
+                        "name": geocoded.get("display_name", location_name)
+                    }
+            except Exception as e:
+                logger.warning(f"Geocoding failed for '{location_name}': {e}")
+        
+        # Parse date to start_date and end_date (single day)
+        if date_str:
+            start_date, end_date = _parse_date_period(date_str)
+        else:
+            # Fallback to a default date if parsing fails
+            today = datetime.now().date()
+            default_start = today - timedelta(days=6)
+            start_date = default_start.strftime('%Y-%m-%d')
+            end_date = today.strftime('%Y-%m-%d')
+        
+        return ParseCommandResponse(
+            location=location_result,
+            language=None,  # Keep current language
+            start_date=start_date,
+            end_date=end_date
+        )
+    
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON from Gemini response: {e}")
+        logger.debug(f"Response text: {response_text}")
+        # Fallback: return a default historic event (US Independence)
+        try:
+            geocoded = geocoding_service.geocode_location("Philadelphia")
+            location_result = {
+                "lat": geocoded["lat"],
+                "lng": geocoded["lng"],
+                "name": geocoded.get("display_name", "Philadelphia")
+            } if geocoded else None
+        except:
+            location_result = None
+        
+        return ParseCommandResponse(
+            location=location_result,
+            language=None,
+            start_date="1776-07-04",
+            end_date="1776-07-04"
+        )
+    except Exception as e:
+        logger.error(f"Error getting random event: {str(e)}")
+        # Fallback: return a default historic event
+        try:
+            geocoded = geocoding_service.geocode_location("Philadelphia")
+            location_result = {
+                "lat": geocoded["lat"],
+                "lng": geocoded["lng"],
+                "name": geocoded.get("display_name", "Philadelphia")
+            } if geocoded else None
+        except:
+            location_result = None
+        
+        return ParseCommandResponse(
+            location=location_result,
+            language=None,
+            start_date="1776-07-04",
+            end_date="1776-07-04"
+        )
 
 
 @router.post("/ephemeral-token")

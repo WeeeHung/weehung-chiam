@@ -8,16 +8,18 @@ import { LanguagePicker } from "./LanguagePicker";
 import { MapStylePicker, MapStyle } from "./MapStylePicker";
 
 interface AppShellProps {
-  date: string;
+  startDate: string;
+  endDate: string;
   language: string;
   mapStyle: MapStyle;
-  onDateChange: (date: string) => void;
+  onDateChange: (startDate: string, endDate: string) => void;
   onLanguageChange: (language: string) => void;
   onMapStyleChange: (style: MapStyle) => void;
 }
 
 export function AppShell({
-  date,
+  startDate,
+  endDate,
   language,
   mapStyle,
   onDateChange,
@@ -26,17 +28,6 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <Group className="app-shell" justify="space-between" align="center" p="md">
-      {/* <Group gap="xs">
-        <ActionIcon variant="subtle" size="lg" title="Explore">
-          <span>🔍</span>
-        </ActionIcon>
-        <ActionIcon variant="subtle" size="lg" title="Time Travel">
-          <span>🕐</span>
-        </ActionIcon>
-        <ActionIcon variant="subtle" size="lg" title="Profile">
-          <span>👤</span>
-        </ActionIcon>
-      </Group> */}
       
       <Title order={4} fw={500} className="app-shell-title">
         Atlantis: World News / History
@@ -50,7 +41,11 @@ export function AppShell({
           <LanguagePicker value={language} onChange={onLanguageChange} />
         </Group>
         <div className="date-selector">
-          <DatePicker value={date} onChange={onDateChange} />
+          <DatePicker 
+            startDate={startDate} 
+            endDate={endDate} 
+            onChange={onDateChange} 
+          />
         </div>
       </Group>
     </Group>

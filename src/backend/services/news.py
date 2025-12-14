@@ -22,16 +22,18 @@ class NewsService:
         
     def fetch_news(
         self,
-        date: str,
+        start_date: str,
+        end_date: str,
         bbox: Dict[str, float],
         language: str = "en",
         max_results: int = 20
     ) -> List[Dict[str, Any]]:
         """
-        Fetch news articles for a specific date and region.
+        Fetch news articles for a specific date range and region.
         
         Args:
-            date: Date in YYYY-MM-DD format
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
             bbox: Bounding box with west, south, east, north
             language: Language code (en, zh, etc.)
             max_results: Maximum number of articles to fetch
@@ -45,26 +47,28 @@ class NewsService:
             return []
         
         try:
-            # Parse date and check if it's too far in the past
+            # Parse dates and check if they're too far in the past
             try:
-                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
                 today = datetime.now().date()
-                days_diff = (today - date_obj.date()).days
+                start_days_diff = (today - start_date_obj.date()).days
+                end_days_diff = (today - end_date_obj.date()).days
                 
                 # NewsAPI only supports dates within the last ~30 days
                 # For historical dates, skip NewsAPI and let Gemini generate historical events
-                if days_diff > 30:
-                    print(f"Date {date} is too far in the past ({days_diff} days). Skipping NewsAPI for historical dates.")
+                if start_days_diff > 30 or end_days_diff > 30:
+                    print(f"Date range {start_date} to {end_date} is too far in the past. Skipping NewsAPI for historical dates.")
                     return []
                 
-                # Also check if date is in the future
-                if days_diff < 0:
-                    print(f"Date {date} is in the future. Skipping NewsAPI.")
+                # Also check if dates are in the future
+                if start_days_diff < 0 or end_days_diff < 0:
+                    print(f"Date range {start_date} to {end_date} includes future dates. Skipping NewsAPI.")
                     return []
                     
             except ValueError:
                 # Invalid date format, skip NewsAPI
-                print(f"Invalid date format: {date}. Skipping NewsAPI.")
+                print(f"Invalid date format: {start_date} or {end_date}. Skipping NewsAPI.")
                 return []
             
             # Calculate center point of bbox
@@ -81,12 +85,12 @@ class NewsService:
             
             # Use everything endpoint for recent dates
             url = f"{self.base_url}/everything"
-            params["from"] = date
-            params["to"] = date
+            params["from"] = start_date
+            params["to"] = end_date
             
             # Use a more specific query instead of "*" which might cause issues
             # Search for general news (empty query gets recent articles)
-            if days_diff <= 7:
+            if end_days_diff <= 7:
                 # Very recent - can use empty query or specific terms
                 params["q"] = "news"  # More specific than "*"
             else:
@@ -117,7 +121,7 @@ class NewsService:
         except requests.exceptions.HTTPError as e:
             # Handle specific HTTP errors
             if e.response.status_code == 426:
-                print(f"NewsAPI 426 error for date {date}: API plan restrictions or unsupported date range. Skipping NewsAPI.")
+                print(f"NewsAPI 426 error for date range {start_date} to {end_date}: API plan restrictions or unsupported date range. Skipping NewsAPI.")
                 return []
             print(f"Error fetching news from NewsAPI: {e}")
             return []

@@ -45,14 +45,16 @@ export interface EventDetail {
 }
 
 export interface PinsRequest {
-  date: string;
+  start_date: string;
+  end_date: string;
   language: string;
   max_pins: number;
   viewport: Viewport;
 }
 
 export interface PinsResponse {
-  date: string;
+  start_date: string;
+  end_date: string;
   pins: Pin[];
 }
 

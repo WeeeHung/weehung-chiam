@@ -59,7 +59,14 @@ function createViewportFromLocation(lat: number, lng: number, zoom: number = 10)
 
 function AppContent() {
   const [welcomeCompleted, setWelcomeCompleted] = useState(false);
-  const [date, setDate] = useState(() => {
+  // Default to last 7 days
+  const [startDate, setStartDate] = useState(() => {
+    const today = new Date();
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 6); // 7 days inclusive (today + 6 days ago)
+    return `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, "0")}-${String(sevenDaysAgo.getDate()).padStart(2, "0")}`;
+  });
+  const [endDate, setEndDate] = useState(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   });
@@ -69,6 +76,7 @@ function AppContent() {
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [relatedPinIds, setRelatedPinIds] = useState<string[]>([]);
   const [locationInitialized, setLocationInitialized] = useState(false);
+  const [homeLocation, setHomeLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [canFetchEvents, setCanFetchEvents] = useState(false);
   const [eventDialogState, setEventDialogState] = useState<{
     connectionStatus: "idle" | "connecting" | "connected" | "error";
@@ -90,6 +98,7 @@ function AppContent() {
     if (locationInitialized || !navigator.geolocation) {
       // Geolocation not supported, use NYC as fallback
       if (!locationInitialized) {
+        setHomeLocation({ lat: NYC_LAT, lng: NYC_LNG });
         setViewport(createViewportFromLocation(NYC_LAT, NYC_LNG, 11));
         setLocationInitialized(true);
       }
@@ -106,6 +115,8 @@ function AppContent() {
           accuracy: position.coords.accuracy,
           timestamp: new Date(position.timestamp).toISOString(),
         });
+        // Store user's location as home location
+        setHomeLocation({ lat: latitude, lng: longitude });
         setViewport(createViewportFromLocation(latitude, longitude, 11));
         setLocationInitialized(true);
       },
@@ -113,6 +124,7 @@ function AppContent() {
         // Error or permission denied: use NYC as fallback
         console.log("Geolocation error:", error.message);
         console.log("Falling back to NYC location:", { lat: NYC_LAT, lng: NYC_LNG });
+        setHomeLocation({ lat: NYC_LAT, lng: NYC_LNG });
         setViewport(createViewportFromLocation(NYC_LAT, NYC_LNG, 11));
         setLocationInitialized(true);
       },
@@ -130,7 +142,8 @@ function AppContent() {
   // Fetch pins (viewport is already debounced in WorldMap component)
   // Wait for initial delay to complete before fetching
   const { data: pinsData, isLoading: isLoadingPins, manualRefetch } = usePins(
-    date,
+    startDate,
+    endDate,
     viewport,
     language,
     8,
@@ -157,7 +170,7 @@ function AppContent() {
     // Also close any open dialog when resetting
     setSelectedPin(null);
     setRelatedPinIds([]);
-  }, [date, language]);
+  }, [startDate, endDate, language]);
 
   const pins = accumulatedPins;
 
@@ -176,14 +189,14 @@ function AppContent() {
     setViewport(newViewport);
     // Trigger pins fetch with new viewport
     if (manualRefetch) {
-      manualRefetch(newViewport, undefined, undefined);
+      manualRefetch(newViewport, undefined, undefined, undefined);
     }
   }, [manualRefetch]);
 
   // Handle manual fetch button click
   const handleManualFetch = useCallback(() => {
     if (manualRefetch) {
-      manualRefetch(undefined, undefined, undefined);
+      manualRefetch(undefined, undefined, undefined, undefined);
     }
   }, [manualRefetch]);
 
@@ -192,16 +205,77 @@ function AppContent() {
     setLanguage(newLanguage);
     // Trigger pins fetch with new language
     if (manualRefetch) {
-      manualRefetch(undefined, undefined, newLanguage);
+      manualRefetch(undefined, undefined, undefined, newLanguage);
     }
   }, [manualRefetch]);
 
   // Handle date change from voice command
-  const handleDateChangeFromVoice = useCallback((newDate: string) => {
-    setDate(newDate);
+  const handleDateChangeFromVoice = useCallback((newStartDate: string, newEndDate: string) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
     // Trigger pins fetch with new date
     if (manualRefetch) {
-      manualRefetch(undefined, newDate, undefined);
+      manualRefetch(undefined, newStartDate, newEndDate, undefined);
+    }
+  }, [manualRefetch]);
+
+  // Handle home click - navigate to user's initial location (or NYC fallback)
+  const handleHomeClick = useCallback(() => {
+    const lat = homeLocation ? homeLocation.lat : NYC_LAT;
+    const lng = homeLocation ? homeLocation.lng : NYC_LNG;
+    const homeViewport = createViewportFromLocation(lat, lng, 11);
+    setViewport(homeViewport);
+    if (manualRefetch) {
+      manualRefetch(homeViewport, undefined, undefined, undefined);
+    }
+  }, [manualRefetch, homeLocation]);
+
+  // Handle random event click - fetch random historic event and navigate
+  const handleRandomClick = useCallback(async () => {
+    try {
+      const response = await fetch("/api/events/random-event", {
+        method: "GET",
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.statusText}`);
+      }
+
+      const randomEvent = await response.json();
+      console.log("Random event:", randomEvent);
+
+      // Update date range if provided
+      if (randomEvent.start_date && randomEvent.end_date) {
+        setStartDate(randomEvent.start_date);
+        setEndDate(randomEvent.end_date);
+      }
+
+      // Navigate to location if provided
+      if (randomEvent.location && randomEvent.location.lat && randomEvent.location.lng) {
+        const viewport = createViewportFromLocation(
+          randomEvent.location.lat,
+          randomEvent.location.lng,
+          11
+        );
+        setViewport(viewport);
+        
+        // Trigger pins fetch with new location and date
+        if (manualRefetch) {
+          manualRefetch(
+            viewport,
+            randomEvent.start_date,
+            randomEvent.end_date,
+            randomEvent.language || undefined
+          );
+        }
+      } else if (randomEvent.start_date && randomEvent.end_date) {
+        // If only date was provided, just refetch with new date
+        if (manualRefetch) {
+          manualRefetch(undefined, randomEvent.start_date, randomEvent.end_date, undefined);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching random event:", error);
     }
   }, [manualRefetch]);
 
@@ -221,10 +295,14 @@ function AppContent() {
   return (
     <div className="app">
       <AppShell
-        date={date}
+        startDate={startDate}
+        endDate={endDate}
         language={language}
         mapStyle={mapStyle}
-        onDateChange={setDate}
+        onDateChange={(start, end) => {
+          setStartDate(start);
+          setEndDate(end);
+        }}
         onLanguageChange={setLanguage}
         onMapStyleChange={setMapStyle}
       />
@@ -289,6 +367,8 @@ function AppContent() {
         onLanguageChange={handleLanguageChangeFromVoice}
         onDateChange={handleDateChangeFromVoice}
         onManualFetch={handleManualFetch}
+        onHomeClick={handleHomeClick}
+        onRandomClick={handleRandomClick}
         currentLanguage={language}
       />
     </div>

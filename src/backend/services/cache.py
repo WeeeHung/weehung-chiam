@@ -26,7 +26,8 @@ class CacheService:
     
     def get_pins_key(
         self,
-        date: str,
+        start_date: str,
+        end_date: str,
         bbox: Dict[str, float],
         zoom: float,
         language: str,
@@ -44,7 +45,8 @@ class CacheService:
         
         return self._make_key(
             "pins",
-            date,
+            start_date,
+            end_date,
             rounded_bbox,
             zoom_bucket,
             language,
@@ -55,21 +57,21 @@ class CacheService:
         """Generate cache key for explanation."""
         return self._make_key("explanation", event_id, language)
     
-    def get_date_pins_key(self, date: str, language: str) -> str:
-        """Generate cache key for accumulated pins by date."""
-        return self._make_key("date_pins", date, language)
+    def get_date_range_pins_key(self, start_date: str, end_date: str, language: str) -> str:
+        """Generate cache key for accumulated pins by date range."""
+        return self._make_key("date_range_pins", start_date, end_date, language)
     
-    def get_date_pins(self, date: str, language: str) -> Optional[Any]:
-        """Get all accumulated pins for a date."""
-        key = self.get_date_pins_key(date, language)
+    def get_date_range_pins(self, start_date: str, end_date: str, language: str) -> Optional[Any]:
+        """Get all accumulated pins for a date range."""
+        key = self.get_date_range_pins_key(start_date, end_date, language)
         return self.get(key)
     
-    def merge_and_set_date_pins(self, date: str, language: str, new_pins: list) -> list:
+    def merge_and_set_date_range_pins(self, start_date: str, end_date: str, language: str, new_pins: list) -> list:
         """
-        Merge new pins with existing pins for a date (deduplicate by event_id).
+        Merge new pins with existing pins for a date range (deduplicate by event_id).
         Returns the merged list of pins.
         """
-        key = self.get_date_pins_key(date, language)
+        key = self.get_date_range_pins_key(start_date, end_date, language)
         existing_pins = self.get(key) or []
         
         # Create a set of existing event_ids for fast lookup

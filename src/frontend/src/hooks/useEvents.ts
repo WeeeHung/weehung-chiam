@@ -63,7 +63,8 @@ async function fetchPins(request: PinsRequest): Promise<PinsResponse> {
     timestamp,
     endpoint: `${API_BASE}/events/pins`,
     request: {
-      date: request.date,
+      start_date: request.start_date,
+      end_date: request.end_date,
       language: request.language,
       max_pins: request.max_pins,
       viewport: {
@@ -102,27 +103,29 @@ async function fetchPins(request: PinsRequest): Promise<PinsResponse> {
 }
 
 export function usePins(
-  date: string,
+  startDate: string,
+  endDate: string,
   viewport: PinsRequest["viewport"],
   language: string = "en",
   maxPins: number = 10,
   enabled: boolean = true
 ) {
-  // Log date value to verify it's stable (YYYY-MM-DD format, no time)
-  const prevDateRef_log = useRef<string | null>(null);
+  // Log date values to verify they're stable (YYYY-MM-DD format, no time)
+  const prevStartDateRef_log = useRef<string | null>(null);
+  const prevEndDateRef_log = useRef<string | null>(null);
   useEffect(() => {
-    if (prevDateRef_log.current !== date) {
-      console.log(`[usePins] 📅 Date value`, {
-        date,
-        dateLength: date.length,
-        dateType: typeof date,
-        previous: prevDateRef_log.current,
-        matchesYYYYMMDD: /^\d{4}-\d{2}-\d{2}$/.test(date),
-        includesTime: date.includes('T') || date.includes(' '),
+    if (prevStartDateRef_log.current !== startDate || prevEndDateRef_log.current !== endDate) {
+      console.log(`[usePins] 📅 Date range`, {
+        startDate,
+        endDate,
+        previousStartDate: prevStartDateRef_log.current,
+        previousEndDate: prevEndDateRef_log.current,
+        matchesYYYYMMDD: /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate),
       });
-      prevDateRef_log.current = date;
+      prevStartDateRef_log.current = startDate;
+      prevEndDateRef_log.current = endDate;
     }
-  }, [date]);
+  }, [startDate, endDate]);
 
   // Normalize viewport helper function - used for both comparison and query key
   // Round bbox to 2 decimal places (~1km precision) to group similar viewports together
@@ -144,7 +147,8 @@ export function usePins(
   const [stabilizedViewport, setStabilizedViewport] = useState<PinsRequest["viewport"] | null>(null);
   
   // Track frozen date/language that only update on manual triggers (not on prop changes)
-  const [frozenDate, setFrozenDate] = useState<string>(date);
+  const [frozenStartDate, setFrozenStartDate] = useState<string>(startDate);
+  const [frozenEndDate, setFrozenEndDate] = useState<string>(endDate);
   const [frozenLanguage, setFrozenLanguage] = useState<string>(language);
   
   // Track if initial load fetch has completed
@@ -204,7 +208,8 @@ export function usePins(
   // This prevents automatic refetches when date/language props change
   const queryKey = useMemo(() => [
     "pins",
-    frozenDate,
+    frozenStartDate,
+    frozenEndDate,
     normalizedViewport.bbox.west,
     normalizedViewport.bbox.south,
     normalizedViewport.bbox.east,
@@ -212,29 +217,35 @@ export function usePins(
     normalizedViewport.zoom,
     frozenLanguage,
     maxPins,
-  ], [frozenDate, normalizedViewport, frozenLanguage, maxPins]);
+  ], [frozenStartDate, frozenEndDate, normalizedViewport, frozenLanguage, maxPins]);
 
   // Track query key changes with detailed breakdown
   const prevQueryKeyRef = useRef<string | null>(null);
-  const prevDateRef = useRef<string | null>(null);
+  const prevStartDateRef = useRef<string | null>(null);
+  const prevEndDateRef = useRef<string | null>(null);
   const prevNormalizedViewportRef = useRef<string | null>(null);
   
   useEffect(() => {
     const queryKeyStr = JSON.stringify(queryKey);
-    const dateStr = date;
+    const startDateStr = startDate;
+    const endDateStr = endDate;
     const normalizedViewportStr = JSON.stringify(normalizedViewport);
     
     // Track individual component changes
     const changes: string[] = [];
-    if (prevDateRef.current !== null && prevDateRef.current !== dateStr) {
-      changes.push(`date: "${prevDateRef.current}" → "${dateStr}"`);
+    if (prevStartDateRef.current !== null && prevStartDateRef.current !== startDateStr) {
+      changes.push(`startDate: "${prevStartDateRef.current}" → "${startDateStr}"`);
+    }
+    if (prevEndDateRef.current !== null && prevEndDateRef.current !== endDateStr) {
+      changes.push(`endDate: "${prevEndDateRef.current}" → "${endDateStr}"`);
     }
     if (prevNormalizedViewportRef.current !== null && prevNormalizedViewportRef.current !== normalizedViewportStr) {
       changes.push(`normalizedViewport changed`);
     }
     
     // Update refs
-    prevDateRef.current = dateStr;
+    prevStartDateRef.current = startDateStr;
+    prevEndDateRef.current = endDateStr;
     prevNormalizedViewportRef.current = normalizedViewportStr;
     
     if (prevQueryKeyRef.current !== null && prevQueryKeyRef.current !== queryKeyStr) {
@@ -244,10 +255,15 @@ export function usePins(
         queryKey,
         componentChanges: changes.length > 0 ? changes : ['unknown'],
         breakdown: {
-          date: {
-            previous: prevDateRef.current === null ? null : prevDateRef.current,
-            current: dateStr,
-            changed: prevDateRef.current !== null && prevDateRef.current !== dateStr,
+          startDate: {
+            previous: prevStartDateRef.current === null ? null : prevStartDateRef.current,
+            current: startDateStr,
+            changed: prevStartDateRef.current !== null && prevStartDateRef.current !== startDateStr,
+          },
+          endDate: {
+            previous: prevEndDateRef.current === null ? null : prevEndDateRef.current,
+            current: endDateStr,
+            changed: prevEndDateRef.current !== null && prevEndDateRef.current !== endDateStr,
           },
           normalizedViewport: {
             changed: prevNormalizedViewportRef.current !== null && prevNormalizedViewportRef.current !== normalizedViewportStr,
@@ -259,10 +275,10 @@ export function usePins(
       });
     }
     prevQueryKeyRef.current = queryKeyStr;
-  }, [queryKey, date, normalizedViewport, language, maxPins]);
+  }, [queryKey, startDate, endDate, normalizedViewport, language, maxPins]);
 
   // Track enabled state
-  const isQueryEnabled = enabled && !!date && !!viewport && !!stabilizedViewport;
+  const isQueryEnabled = enabled && !!startDate && !!endDate && !!viewport && !!stabilizedViewport;
   const prevEnabledRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (prevEnabledRef.current !== isQueryEnabled) {
@@ -271,14 +287,15 @@ export function usePins(
         current: isQueryEnabled,
         reasons: {
           enabled,
-          hasDate: !!date,
+          hasStartDate: !!startDate,
+          hasEndDate: !!endDate,
           hasViewport: !!viewport,
           hasStabilizedViewport: !!stabilizedViewport,
         },
       });
       prevEnabledRef.current = isQueryEnabled;
     }
-  }, [isQueryEnabled, enabled, date, viewport, stabilizedViewport]);
+  }, [isQueryEnabled, enabled, startDate, endDate, viewport, stabilizedViewport]);
   
   // Use normalized viewport in query key - this only changes when viewport changes > 80%
   // Note: queryFn uses values from queryKey via closure, but we explicitly use frozen values
@@ -292,7 +309,8 @@ export function usePins(
       // Use the current stabilized viewport (or viewport as fallback) for the request
       const viewportToUse = stabilizedViewport || viewport;
       return fetchPins({
-        date: frozenDate, // Use frozen date from queryKey
+        start_date: frozenStartDate, // Use frozen start date from queryKey
+        end_date: frozenEndDate, // Use frozen end date from queryKey
         viewport: viewportToUse,
         language: frozenLanguage, // Use frozen language from queryKey
         max_pins: maxPins,
@@ -305,13 +323,20 @@ export function usePins(
   // Expose manual trigger function for button/voice commands
   return {
     ...query,
-    manualRefetch: async (newViewport?: PinsRequest["viewport"], newDate?: string, newLanguage?: string) => {
+    manualRefetch: async (
+      newViewport?: PinsRequest["viewport"],
+      newStartDate?: string,
+      newEndDate?: string,
+      newLanguage?: string
+    ) => {
       // Update frozen values if provided, otherwise use current props
-      if (newDate !== undefined) {
-        setFrozenDate(newDate);
-      } else if (date !== frozenDate) {
-        // Update to current if it changed
-        setFrozenDate(date);
+      if (newStartDate !== undefined && newEndDate !== undefined) {
+        setFrozenStartDate(newStartDate);
+        setFrozenEndDate(newEndDate);
+      } else if (startDate !== frozenStartDate || endDate !== frozenEndDate) {
+        // Update to current if they changed
+        setFrozenStartDate(startDate);
+        setFrozenEndDate(endDate);
       }
       
       if (newLanguage !== undefined) {

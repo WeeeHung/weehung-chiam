@@ -62,7 +62,8 @@ class EventDetail(BaseModel):
 
 class PinsRequest(BaseModel):
     """Request to generate pins."""
-    date: str = Field(..., description="Date in YYYY-MM-DD format")
+    start_date: str = Field(..., description="Start date in YYYY-MM-DD format")
+    end_date: str = Field(..., description="End date in YYYY-MM-DD format")
     language: str = Field(default="en", description="Language code (en, zh, etc.)")
     max_pins: int = Field(default=8, ge=1, le=20, description="Maximum number of pins")
     viewport: Viewport = Field(..., description="Map viewport")
@@ -70,7 +71,8 @@ class PinsRequest(BaseModel):
 
 class PinsResponse(BaseModel):
     """Response containing generated pins."""
-    date: str
+    start_date: str
+    end_date: str
     pins: List[Pin]
 
 
@@ -96,7 +98,7 @@ class ParseCommandRequest(BaseModel):
 
 
 class ParseCommandResponse(BaseModel):
-    """Response containing extracted location, language, and date."""
+    """Response containing extracted location, language, and date range."""
     location: Optional[dict] = Field(
         default=None,
         description="Location with lat/lng coordinates, or None if not found"
@@ -105,8 +107,12 @@ class ParseCommandResponse(BaseModel):
         default=None,
         description="Language code (en, zh, es, fr, etc.), or None if not found"
     )
-    date: Optional[str] = Field(
+    start_date: Optional[str] = Field(
         default=None,
-        description="Date in YYYY-MM-DD format, or None if not found"
+        description="Start date in YYYY-MM-DD format, or None if not found"
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="End date in YYYY-MM-DD format, or None if not found"
     )
 

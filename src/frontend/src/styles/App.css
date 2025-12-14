@@ -247,6 +247,25 @@ body {
   height: 100%;
 }
 
+/* Pin Popup - transparent background, only show inner glass panel */
+.mapboxgl-popup.pin-popup {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.mapboxgl-popup.pin-popup .mapboxgl-popup-content {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.mapboxgl-popup.pin-popup .mapboxgl-popup-tip {
+  display: none !important;
+}
+
 /* Mapbox handles positioning via transforms - don't interfere with position/transform */
 .map-marker {
   /* No position or transform - Mapbox controls these */

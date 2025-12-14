@@ -16,29 +16,6 @@ interface EventDialogProps {
   onClose: () => void;
 }
 
-// Map language codes to supported API language codes
-function getLanguageCode(lang: string): string {
-  const languageMap: Record<string, string> = {
-    en: "en-US",
-    zh: "zh-CN", // Default to Simplified Chinese
-    "zh-cn": "zh-CN",
-    "zh-tw": "zh-TW",
-    "zh-hans": "zh-CN",
-    "zh-hant": "zh-TW",
-    es: "es-ES",
-    fr: "fr-FR",
-    de: "de-DE",
-    ja: "ja-JP",
-    ko: "ko-KR",
-    pt: "pt-BR",
-    it: "it-IT",
-    ru: "ru-RU",
-    ar: "ar-SA",
-    hi: "hi-IN",
-  };
-  return languageMap[lang.toLowerCase()] || "en-US";
-}
-
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
 export function EventDialog({ pin, language, onClose }: EventDialogProps) {
@@ -99,6 +76,7 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
     apiKey,
     initialConfig: {
       model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+      // model: "models/gemini-2.0-flash-exp",
       systemInstruction: {
         parts: [{ text: systemInstruction }],
       },
@@ -135,6 +113,7 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
 
       setConfig({
         model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+        // model: "models/gemini-2.0-flash-exp",
         systemInstruction: {
           parts: [{ text: newSystemInstruction }],
         },
@@ -305,6 +284,10 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
   // Determine if playing based on isModelTurn
   const isPlaying = isModelTurn;
 
+  const get_number_from_event_id = (event_id: string) => {
+    return parseInt(event_id.split("_")[3]);
+  }
+
   if (!pin) return null;
 
   return (
@@ -314,7 +297,12 @@ Respond in ${language}. Be conversational and helpful. Keep responses concise fo
           ×
         </button>
 
-        <h2>{pin.title}</h2>
+        <h2>
+          <span style={{ background: "#ffe066", color: "#111", borderRadius: "5px", padding: "2px 7px", marginRight: "8px", fontWeight: 700, fontFamily: "monospace" }}>
+            #{get_number_from_event_id(pin.event_id)}
+          </span>
+          {pin.title}
+        </h2>
         <p className="event-location">{pin.location_label}</p>
         <p className="event-date">{pin.date}</p>
 

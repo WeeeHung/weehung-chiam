@@ -61,6 +61,14 @@ export function WorldMap({
       style: mapStyle,
       center: center,
       zoom: viewport.zoom,
+
+      // --- ADD THESE LINES TO STOP MOVEMENT ---
+      inertia: 0,             // Stops the map instantly when you let go (no "sliding")
+      dragRotate: false,      // Prevents the map from rotating (spinning compass)
+      touchZoomRotate: false, // Prevents rotation on touch screens
+      pitchWithRotate: false,  // Prevents tilting when you rotate
+      // ----------------------------------------
+      antialias: true,        // Smooth edges
     });
 
     map.current.on("load", () => {
@@ -249,203 +257,110 @@ export function WorldMap({
     }
 
     // Update or add markers
-    pins.forEach((pin, index) => {
+    pins.forEach((pin) => {
       if (!map.current) return;
-
-      const isSelected = pin.event_id === selectedPinId;
-      const isRelated = relatedPinIds.includes(pin.event_id);
-      const pinIndex = index + 1; // 1-based index for display
 
       const existingMarker = currentMarkers.get(pin.event_id);
 
       if (existingMarker) {
-        // Update existing marker if selection state changed
-        const markerEl = existingMarker.getElement();
-        const wasSelected = markerEl.classList.contains("selected");
-        const wasRelated = markerEl.classList.contains("related");
-
-        // All pins have the same design regardless of selection state
-        if (wasSelected !== isSelected || wasRelated !== isRelated) {
-          markerEl.className = "map-marker";
-          // Keep border consistent for all pins
-          const circleEl = markerEl.querySelector("div:first-child") as HTMLElement;
-          if (circleEl) {
-            circleEl.style.border = "2px solid #fff";
-          }
-        }
-
-        // Update index number if it changed
-        const indexEl = markerEl.querySelector(".pin-index") as HTMLElement;
-        if (indexEl) {
-          indexEl.textContent = pinIndex.toString();
-        }
-
-        // Only update position if coordinates actually changed
+        // Update position if coordinates actually changed
         const [currentLng, currentLat] = existingMarker.getLngLat().toArray();
         if (Math.abs(currentLng - pin.lng) > 0.0001 || Math.abs(currentLat - pin.lat) > 0.0001) {
           existingMarker.setLngLat([pin.lng, pin.lat]);
         }
       } else {
-        // Create new marker element with pin shape
-        // Pin shape: circular top with pointed bottom
-        // All pins are the same size (not based on significance)
-        const size = 30; // Fixed size for all pins
+        const Marker = (mapboxgl as any).Marker;
+        const Popup = (mapboxgl as any).Popup;
         const pinColor = getPositivityColor(pin.positivity_scale);
         
-        const wrapper = document.createElement("div");
-        wrapper.className = "map-marker";
-        // Mapbox handles positioning via CSS transforms - don't interfere
-        // Set explicit dimensions that Mapbox will use for anchor calculation
-        wrapper.style.width = `${size * 1.3}px`;
-        wrapper.style.height = `${size * 1.6}px`;
-        wrapper.style.cursor = "pointer";
-        wrapper.style.pointerEvents = "auto";
-        // Ensure no positioning styles that could interfere with Mapbox transforms
-        wrapper.style.margin = "0";
-        wrapper.style.padding = "0";
-        wrapper.style.boxSizing = "content-box";
-        // Use relative positioning for tooltip, but ensure it doesn't affect Mapbox anchor calculation
-        wrapper.style.position = "relative";
-        wrapper.style.overflow = "visible";
-        // Ensure wrapper maintains exact dimensions - tooltip is absolutely positioned so it won't affect layout
-        wrapper.style.display = "block";
+        // Create popup for tooltip with glass panel design
+        const popupHTML = `
+          <div style="
+            padding: 10px 16px;
+            background-color: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(8px) saturate(180%);
+            -webkit-backdrop-filter: blur(8px) saturate(180%);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 250px;
+            text-align: center;
+          ">
+            <div style="
+              margin-bottom: 6px;
+              font-weight: 600;
+              font-size: 15px;
+              line-height: 1.4;
+              color: #111827;
+            ">${pin.title}</div>
+            <div style="
+              font-size: 11px;
+              opacity: 0.7;
+              font-style: italic;
+              color: #374151;
+            ">Read the full story...</div>
+          </div>
+        `;
         
-        // Create inner wrapper for visual transforms (hover/selected scaling)
-        const inner = document.createElement("div");
-        inner.className = "map-marker-inner";
-        inner.style.width = "100%";
-        inner.style.height = "100%";
-        inner.style.display = "flex";
-        inner.style.flexDirection = "column";
-        inner.style.alignItems = "center";
+        const popup = new Popup({
+          closeButton: false,
+          closeOnClick: false,
+          className: 'pin-popup',
+          maxWidth: 'none'
+        }).setHTML(popupHTML);
         
-        // Create circular top part
-        const circle = document.createElement("div");
-        circle.style.width = `${size}px`;
-        circle.style.height = `${size}px`;
-        circle.style.borderRadius = "50%";
-        circle.style.backgroundColor = pinColor;
-        circle.style.border = "2px solid #fff";
-        circle.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
-        circle.style.display = "flex";
-        circle.style.alignItems = "center";
-        circle.style.justifyContent = "center";
-        circle.style.zIndex = "2";
-        
-        // Create pointed bottom (triangle)
-        const point = document.createElement("div");
-        const pointSize = size * 0.25;
-        point.style.width = "0";
-        point.style.height = "0";
-        point.style.borderLeft = `${pointSize}px solid transparent`;
-        point.style.borderRight = `${pointSize}px solid transparent`;
-        point.style.borderTop = `${size * 0.4}px solid ${pinColor}`;
-        point.style.marginTop = `-${size * 0.15}px`; // Overlap with circle slightly
-        point.style.filter = "drop-shadow(0 2px 2px rgba(0,0,0,0.3))";
-        
-        // Create index number element
-        const indexEl = document.createElement("span");
-        indexEl.className = "pin-index";
-        indexEl.textContent = pinIndex.toString();
-        indexEl.style.color = "#ffffff";
-        indexEl.style.fontSize = `${Math.max(10, size * 0.4)}px`;
-        indexEl.style.fontWeight = "bold";
-        indexEl.style.textShadow = "0 1px 2px rgba(0,0,0,0.7)";
-        indexEl.style.userSelect = "none";
-        indexEl.style.pointerEvents = "none";
-        circle.appendChild(indexEl);
-        
-        inner.appendChild(circle);
-        inner.appendChild(point);
-        wrapper.appendChild(inner);
-        
-        // Create tooltip element with glassy design
-        const tooltip = document.createElement("div");
-        tooltip.className = "pin-tooltip";
-        tooltip.style.position = "absolute";
-        tooltip.style.bottom = "100%";
-        tooltip.style.left = "50%";
-        tooltip.style.transform = "translateX(-50%)";
-        tooltip.style.marginBottom = "8px";
-        tooltip.style.padding = "10px 16px";
-        tooltip.style.width = "280px";
-        tooltip.style.backgroundColor = "rgba(255, 255, 255, 0.65)";
-        tooltip.style.backdropFilter = "blur(8px) saturate(180%)";
-        tooltip.style.setProperty("-webkit-backdrop-filter", "blur(8px) saturate(180%)");
-        tooltip.style.color = "#111827";
-        tooltip.style.borderRadius = "8px";
-        tooltip.style.fontSize = "13px";
-        tooltip.style.fontWeight = "500";
-        tooltip.style.whiteSpace = "normal";
-        tooltip.style.textAlign = "center";
-        tooltip.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
-        tooltip.style.border = "1px solid rgba(255, 255, 255, 0.3)";
-        tooltip.style.opacity = "0";
-        tooltip.style.visibility = "hidden";
-        tooltip.style.transition = "opacity 0.2s, visibility 0.2s";
-        tooltip.style.pointerEvents = "none";
-        tooltip.style.zIndex = "1000";
-        tooltip.style.wordWrap = "break-word";
-        tooltip.style.boxSizing = "border-box";
-        
-        // Create tooltip arrow (pointing down) with glassy style
-        const tooltipArrow = document.createElement("div");
-        tooltipArrow.style.position = "absolute";
-        tooltipArrow.style.top = "100%";
-        tooltipArrow.style.left = "50%";
-        tooltipArrow.style.transform = "translateX(-50%)";
-        tooltipArrow.style.width = "0";
-        tooltipArrow.style.height = "0";
-        tooltipArrow.style.borderLeft = "8px solid transparent";
-        tooltipArrow.style.borderRight = "8px solid transparent";
-        tooltipArrow.style.borderTop = "8px solid rgba(255, 255, 255, 0.85)";
-        tooltipArrow.style.filter = "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1))";
-        
-        // Create tooltip content
-        const tooltipTitle = document.createElement("div");
-        tooltipTitle.textContent = pin.title;
-        tooltipTitle.style.marginBottom = "6px";
-        tooltipTitle.style.fontWeight = "600";
-        tooltipTitle.style.fontSize = "15px";
-        tooltipTitle.style.lineHeight = "1.4";
-        tooltipTitle.style.color = "#111827";
-        
-        const tooltipReadMore = document.createElement("div");
-        tooltipReadMore.textContent = "Read the full story...";
-        tooltipReadMore.style.fontSize = "11px";
-        tooltipReadMore.style.opacity = "0.7";
-        tooltipReadMore.style.fontStyle = "italic";
-        tooltipReadMore.style.color = "#374151";
-        
-        tooltip.appendChild(tooltipTitle);
-        tooltip.appendChild(tooltipReadMore);
-        tooltip.appendChild(tooltipArrow);
-        wrapper.appendChild(tooltip);
-        
-        // Add hover event listeners
-        wrapper.addEventListener("mouseenter", () => {
-          tooltip.style.opacity = "1";
-          tooltip.style.visibility = "visible";
-        });
-        
-        wrapper.addEventListener("mouseleave", () => {
-          tooltip.style.opacity = "0";
-          tooltip.style.visibility = "hidden";
-        });
-        
-        const el = wrapper;
-
-        // Create marker with anchor at bottom center (the pin point)
-        // This ensures the pin point aligns with the lat/lng coordinate
-        const Marker = (mapboxgl as any).Marker;
+        // Create default marker with custom color based on positivity scale
         const marker = new Marker({
-          element: el,
-          anchor: 'bottom', // Anchor at the bottom center of the pin (the point)
+          color: pinColor
         })
           .setLngLat([pin.lng, pin.lat])
+          .setPopup(popup)
           .addTo(map.current);
-
-        el.addEventListener("click", () => onPinClick(pin));
+        
+        // Show popup on hover, hide on mouse leave (hover-only behavior)
+        const markerEl = marker.getElement();
+        let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
+        
+        const showPopup = () => {
+          if (hoverTimeout) {
+            clearTimeout(hoverTimeout);
+            hoverTimeout = null;
+          }
+          if (!popup.isOpen()) {
+            popup.addTo(map.current);
+          }
+        };
+        
+        const hidePopup = () => {
+          if (hoverTimeout) {
+            clearTimeout(hoverTimeout);
+          }
+          hoverTimeout = setTimeout(() => {
+            if (popup.isOpen()) {
+              popup.remove();
+            }
+            hoverTimeout = null;
+          }, 50); // Small delay to allow moving from marker to popup
+        };
+        
+        markerEl.addEventListener("mouseenter", showPopup);
+        markerEl.addEventListener("mouseleave", hidePopup);
+        
+        // Handle popup hover to keep it open when hovering over it
+        popup.on('open', () => {
+          const popupEl = popup.getElement();
+          if (popupEl) {
+            popupEl.addEventListener("mouseenter", () => {
+              if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+              }
+            });
+            popupEl.addEventListener("mouseleave", hidePopup);
+          }
+        });
+        
+        markerEl.addEventListener("click", () => onPinClick(pin));
 
         currentMarkers.set(pin.event_id, marker);
       }
